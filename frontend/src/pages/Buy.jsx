@@ -18,6 +18,7 @@ function Lane({ t, req, onCounter }) {
         <b>{t.supplier_name}</b>
         <Chip kind={agent ? "chip-deep" : "chip-line"}>{agent ? <Bot size={13} /> : <User size={13} />} {agent ? "Agent ↔ Agent" : "Agent ↔ Human"}</Chip>
         <Chip kind={t.status === "excluded" ? "chip-red" : t.status === "final" ? "chip-green" : "chip-amber"}>{t.status.replace("_", " ")}</Chip>
+        {(req.supplier_lang?.[t.supplier_id] === "es") && !agent && <Chip kind="chip-teal">Español</Chip>}
       </div>
       <div className="lane-msgs">
         {t.messages.map((m) => (
@@ -122,6 +123,17 @@ export default function Buy() {
               <div className="row"><span>Final approval</span><b>Maria</b></div>
             </div>
             <div className="tiny muted">Parsed: {req.parse_source}</div>
+            <div className="sup-lang" data-testid="supplier-languages">
+              <div className="eyebrow">Email language per supplier</div>
+              {d.suppliers.filter((s) => s.lane === "agent_human").map((s) => (
+                <div className="row" key={s.id}><span>{s.name}</span>
+                  <div className="seg sm" role="group" aria-label={`Language for ${s.name}`}>
+                    {["en", "es"].map((l) => <button key={l} className={(req.supplier_lang?.[s.id] || "en") === l ? "on" : ""} disabled={busy} onClick={() => call(`/buy/${rid}/supplier-language`, { supplier_id: s.id, language: l }, l === "es" ? `${s.name} will get Spanish emails` : `${s.name} will get English emails`)} data-testid={`sup-lang-${l}-${s.id}`}>{l === "en" ? "English" : "Español"}</button>)}
+                  </div>
+                </div>
+              ))}
+              <div className="tiny muted">Pacific Lumber's lane is agent-to-agent structured data.</div>
+            </div>
           </div>
         </div>
         {req.stage === "request" && <button className="btn btn-primary btn-lg" disabled={busy} onClick={() => call(`/buy/${rid}/start`, null, "Quote requests sent (simulated)")} data-testid="start-sourcing-btn">Start sourcing</button>}
@@ -254,6 +266,12 @@ export default function Buy() {
                 </div>
               )}
               {ship.step === 4 && !ship.matched && <button className="btn btn-primary" disabled={busy} onClick={() => call(`/buy/${rid}/receipt/match`)} data-testid="confirm-arrived-btn"><PackageCheck size={18} /> Confirm what arrived</button>}
+              {ship.credit && (
+                <div className="receipt ok credit" data-testid="late-credit">
+                  <b>Late-delivery credit {money(ship.credit.granted)}</b>
+                  <div className="small">Asked {money(ship.credit.asked)} ({ship.credit.ask_pct}%, your limit). {ship.supplier_name} granted {ship.credit.granted_pct}%, {ship.credit.applied}.</div>
+                </div>
+              )}
               {ship.matched && (
                 <div className={`receipt ${ship.matched.ok ? "ok" : "bad"}`} data-testid="receipt-matched">
                   <b>{ship.matched.ok ? "Receipt matched ✓" : "Receipt mismatch"}</b>

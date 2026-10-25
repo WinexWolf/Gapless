@@ -286,3 +286,77 @@ def test_scorecard_drives_quotes():
     q = {x["supplier_id"]: x for x in get("/buy/current")["quotes"]}
     assert q["pacific"]["on_time"] == 96 and q["bayside"]["on_time"] == 88
     assert q["pacific"]["reliability_risk"] == 0 and q["bayside"]["reliability_risk"] == 117.95
+
+
+# v3 features ----------------------------------------------------------
+def test_second_payment_collected():
+    post("/actions/approve-all", {"origin_url": ORIGIN})
+    tok = {a["id"]: a for a in get("/plan")["actions"]}["act_johnson"]["offer_token"]
+    assert post("/actions/act_johnson/mark-second-paid", ok=False).status_code == 400  # first not paid yet
+    post("/actions/act_johnson/mark-paid")
+    o = get(f"/offers/{tok}")
+    assert o["offer"]["second_open"] and not o["offer"]["second_paid"]
+    r = post("/payments/checkout", {"token": tok, "origin_url": ORIGIN, "part": "second"}, ok=False)
+    assert r.status_code in (200, 502)
+    before = get("/forecast")
+    post("/actions/act_johnson/mark-second-paid")
+    after = get("/forecast")
+    assert after["status"]["secured"] == before["status"]["secured"] + 3100
+    assert after["forecast"]["friday_balance"] == before["forecast"]["friday_balance"] + 3100
+    assert after["forecast"]["weeks"][2]["balance"] == before["forecast"]["weeks"][2]["balance"]  # just arrives earlier
+    assert get(f"/offers/{tok}")["offer"]["second_paid"]
+    assert get("/reminders")["items"][0]["status"] == "cancelled"
+    assert post("/actions/act_johnson/mark-second-paid", ok=False).status_code == 400
+
+
+def test_spanish_supplier_emails_still_sealed():
+    rid = get("/buy/current")["request"]["id"]
+    post(f"/buy/{rid}/supplier-language", {"supplier_id": "bayside", "language": "es"})
+    rid = run_sourcing() if False else rid
+    post(f"/buy/{rid}/start")
+    for _ in range(3):
+        post(f"/buy/{rid}/advance")
+    th = {t["supplier_id"]: t for t in get("/buy/current")["threads"]}
+    bay = " ".join(m["text"] for m in th["bayside"]["messages"])
+    assert "Hola" in bay and "Asistente de Maria" in bay and "3,600" not in bay and "3,390" not in bay
+    assert "Hello East Bay" in th["eastbay"]["messages"][0]["text"]
+
+
+def test_late_credit_within_limit():
+    requests.put(B + "/settings", json={"max_late_credit_pct": 2}, timeout=10)
+    rid = run_sourcing()
+    post(f"/buy/{rid}/approve-quote", {"supplier_id": "pacific"})
+    post(f"/buy/{rid}/pay-decision", {"choice": "due"})
+    post(f"/buy/{rid}/spend-request/approve", {"approve": True})
+    post(f"/buy/{rid}/shipment/delay")
+    payroll_before = get("/forecast")["status"]
+    for _ in range(4):
+        post(f"/buy/{rid}/shipment/advance")
+    c = get("/buy/current")["shipment"]["credit"]
+    assert c["asked"] == 67.8 and c["granted"] == 50.85 and c["granted"] <= c["asked"]
+    pay = [p for p in get("/digest")["supplier_payments"] if "materials" in p["vendor"]][0]
+    assert pay["amount"] == 3339.15
+    assert get("/forecast")["status"] == payroll_before  # buy side never touches payroll secured/gap
+    assert requests.put(B + "/settings", json={"max_late_credit_pct": 9}, timeout=10).status_code == 400
+
+
+def test_no_credit_when_on_time_or_zero_limit():
+    requests.put(B + "/settings", json={"max_late_credit_pct": 0}, timeout=10)
+    rid = run_sourcing()
+    post(f"/buy/{rid}/approve-quote", {"supplier_id": "pacific"})
+    post(f"/buy/{rid}/pay-decision", {"choice": "due"})
+    post(f"/buy/{rid}/spend-request/approve", {"approve": True})
+    post(f"/buy/{rid}/shipment/delay")
+    for _ in range(4):
+        post(f"/buy/{rid}/shipment/advance")
+    assert not get("/buy/current")["shipment"].get("credit")
+
+
+def test_weekly_digest():
+    post("/actions/approve-all", {"origin_url": ORIGIN})
+    d = get("/digest")
+    assert E.d(d["week_of"]).weekday() == 0
+    assert d["headline"].startswith("Short $9,800") and len(d["open_offers"]) == 4
+    vendors = [p["vendor"] for p in d["supplier_payments"]]
+    assert "Pacific Lumber" in vendors and "Insurance premium" in vendors and not any("Payroll" in v for v in vendors)
+    assert "Monday digest" in d["text"]

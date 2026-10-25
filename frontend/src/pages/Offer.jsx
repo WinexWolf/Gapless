@@ -17,6 +17,8 @@ const S = {
     split: (o) => `Split in two: ${money(o.first)} now and ${money(o.second)} on ${fdate(o.second_date)}.`,
     extension: (o) => `Move the due date to ${fdate(o.new_due)} (net+10) for a ${o.fee_pct}% fee (${money(o.fee)}).`,
     history: "History", private: "Private link · shows only this offer",
+    second_title: "Second payment", both_paid: "Both payments received. Invoice settled in full. Thank you!",
+    second: (o) => `${money(o.second)} is scheduled for ${fdate(o.second_date)}. You can pay it now if that's easier.`,
   },
   es: {
     from: "Oferta de", invoice: "Factura", amount: "Monto", due: "Vence", offer: "La oferta", accept: "Aceptar", counter: "Contraoferta", decline: "Rechazar",
@@ -29,6 +31,8 @@ const S = {
     split: (o) => `Dividir en dos: ${money(o.first)} ahora y ${money(o.second)} el ${fdate(o.second_date, "es")}.`,
     extension: (o) => `Mover el vencimiento al ${fdate(o.new_due, "es")} (neto+10) con un cargo de ${o.fee_pct}% (${money(o.fee)}).`,
     history: "Historial", private: "Enlace privado · solo muestra esta oferta",
+    second_title: "Segundo pago", both_paid: "Recibimos ambos pagos. Factura liquidada. ¡Gracias!",
+    second: (o) => `${money(o.second)} está programado para el ${fdate(o.second_date, "es")}. Puede pagarlo ahora si le conviene.`,
   },
 };
 
@@ -80,10 +84,10 @@ export default function Offer() {
       setShowCounter(false);
     } catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
   };
-  const pay = async () => {
+  const pay = async (part) => {
     setBusy(true);
     try {
-      const r = await http.post("/payments/checkout", { token, origin_url: window.location.origin });
+      const r = await http.post("/payments/checkout", { token, origin_url: window.location.origin, part: part === "second" ? "second" : "main" });
       window.location.href = r.data.url;
     } catch (e) { toast.error(errMsg(e)); setBusy(false); }
   };
@@ -116,6 +120,15 @@ export default function Offer() {
 
         {checking && <p className="muted" data-testid="payment-checking">{t.checking}</p>}
         {o.status === "paid" && <div className="banner banner-green" data-testid="offer-paid"><CheckCircle2 size={20} /> {t.paid}</div>}
+        {o.offer.type === "split" && o.offer.second_open && (
+          <div className="offer-box second-box" data-testid="second-payment-box">
+            <div className="eyebrow">{t.second_title}</div>
+            <p className="offer-text">{t.second(o.offer)}</p>
+            <button className="btn btn-primary btn-lg" onClick={() => pay("second")} disabled={busy} data-testid="pay-second-btn"><CreditCard size={18} /> {t.pay} · {money(o.offer.second)}</button>
+            <p className="tiny muted">{t.test}</p>
+          </div>
+        )}
+        {o.offer.type === "split" && o.offer.second_paid && <div className="banner banner-green" data-testid="second-paid"><CheckCircle2 size={20} /> {t.both_paid}</div>}
         {o.status === "declined" && <div className="banner banner-red" data-testid="offer-declined">{t.declined}</div>}
         {o.status === "countered" && <div className="banner banner-amber" data-testid="offer-countered">{t.countered}</div>}
         {o.status === "accepted" && (

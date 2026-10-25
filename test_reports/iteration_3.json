@@ -1,0 +1,51 @@
+{
+  "summary": "Completed frontend testing for new features: Landing page, Digest page, Spanish supplier emails, Late credit, and Mobile responsive. Most features working correctly. Critical issue: Approve-all button not functioning, blocking Threads and second payment flow testing.",
+  "backend_issues": {
+    "critical_bugs": [],
+    "flaky_endpoints": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "component": "Plan page - Approve all button",
+        "issue": "Approve all (4) button click does not trigger API call or create threads. Actions remain in 'Draft' status after clicking. This blocks testing of Threads page, second payment flow, and digest with open offers.",
+        "affected_selectors": ["[data-testid='approve-all-btn']"],
+        "fix_priority": "CRITICAL",
+        "impact": "Blocks entire payroll gap workflow - users cannot approve actions to start conversations with counterparties"
+      }
+    ],
+    "design_issues": []
+  },
+  "passed_tests": [
+    "Landing page loads with all sections (hero, stats, how it works, features, trust, footer)",
+    "Landing page CTAs (top, hero, bottom) navigate to /dashboard correctly",
+    "Landing page 'See how it works' link scrolls to #how section",
+    "Dashboard has Monday digest button (open-digest-btn)",
+    "Dashboard nav links (brand, Dashboard) work correctly",
+    "Digest page loads with correct sections (The week's gap, Open offers, Upcoming supplier payments)",
+    "Digest headline shows 'Short $9,800' status before actions (red banner)",
+    "Digest copy button shows toast (though clipboard copy failed in test environment)",
+    "More page has Monday digest link",
+    "Spanish supplier emails: Bayside shows 'Español' chip and Spanish messages ('Hola equipo de Bayside...')",
+    "Spanish supplier emails: East Bay shows English messages (no Spanish)",
+    "Settings page has Late deliveries section with max credit input (default 2%) and auto toggle",
+    "Late credit flow: Full buy process works (approve Pacific, pay on due date, approve in Link, simulate delay, 4 updates)",
+    "Late credit card displays correctly showing $50.85 credit (asked $67.80 at 2%, granted 1.5%)",
+    "Late credit shows internal notes with 'Only you see this' indicator",
+    "Mobile 375px: Landing page has NO horizontal overflow",
+    "Mobile 375px: Digest page has NO horizontal overflow",
+    "Mobile 375px: No console errors on landing or digest pages",
+    "Demo controls (open, reset, next) buttons present and functional"
+  ],
+  "test_report_links": [],
+  "action_item_for_main_agent": "CRITICAL: Fix Approve-all button on Plan page. Button click does not trigger /api/actions/approve-all endpoint or actions remain in draft status. This blocks the entire payroll gap workflow including: (1) Threads creation, (2) Second payment flow testing, (3) Digest showing open offers. Verify the approve-all API endpoint is working and that the frontend is correctly calling it with origin_url parameter. After fix, need to retest: Digest with 4 open offers, Second payment flow (Johnson's $3,100 second payment), and Threads page functionality.",
+  "updated_files": [],
+  "success_percentage": {
+    "frontend": "75%",
+    "backend": "N/A (frontend-only testing)",
+    "overall": "75%"
+  },
+  "should_call_test_agent_after_fix": "true",
+  "should_main_agent_test_itself": "false"
+}

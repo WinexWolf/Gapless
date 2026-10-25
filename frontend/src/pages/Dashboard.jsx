@@ -62,7 +62,10 @@ export default function Dashboard() {
               {st.covered ? "Covered ✓" : `${money(st.remaining)} to go`}
             </div>
           </div>
-          <Link to="/plan" className="btn btn-primary" data-testid="open-plan-btn">Open the plan <ArrowRight size={18} /></Link>
+          <div className="btn-row" style={{ marginTop: 0 }}>
+            <Link to="/digest" className="btn btn-ghost" data-testid="open-digest-btn">Monday digest</Link>
+            <Link to="/plan" className="btn btn-primary" data-testid="open-plan-btn">Open the plan <ArrowRight size={18} /></Link>
+          </div>
         </div>
         <GapBar gap={st.gap} secured={st.secured} pending={st.pending} covered={st.covered} />
         <div className="expl" data-testid="plan-explanation">

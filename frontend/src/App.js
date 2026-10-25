@@ -14,9 +14,11 @@ import Settings from "@/pages/Settings";
 import Activity from "@/pages/Activity";
 import Outbox from "@/pages/Outbox";
 import Offer from "@/pages/Offer";
+import Landing from "@/pages/Landing";
+import Digest from "@/pages/Digest";
 
 const NAV = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, id: "dashboard" },
+  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, id: "dashboard" },
   { to: "/plan", label: "Plan", icon: ListChecks, id: "plan" },
   { to: "/buy", label: "Buy", icon: ShoppingCart, id: "buy" },
   { to: "/threads", label: "Threads", icon: MessagesSquare, id: "threads" },
@@ -45,7 +47,8 @@ function Shell() {
       </header>
       <main className="g-main">
         <Routes>
-          <Route path="/" element={<Dashboard />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/digest" element={<Digest />} />
           <Route path="/plan" element={<Plan />} />
           <Route path="/threads" element={<Threads />} />
           <Route path="/buy" element={<Buy />} />
@@ -77,6 +80,7 @@ export default function App() {
     <AppCtx.Provider value={{ tick, bump }}>
       <BrowserRouter>
         <Routes>
+          <Route path="/" element={<Landing />} />
           <Route path="/o/:token" element={<Offer />} />
           <Route path="*" element={<Shell />} />
         </Routes>

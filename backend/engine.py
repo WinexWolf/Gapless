@@ -93,7 +93,8 @@ def seed_docs(T):
 
 DEFAULT_SETTINGS = {"id": "settings", "max_early_pay_pct": 2.0, "max_ext_fee_pct": 1.0,
                     "require_approval": True, "tone": "friendly", "language": "en",
-                    "supplier_has_ai": True, "llm_force_fail": False}
+                    "supplier_has_ai": True, "llm_force_fail": False,
+                    "max_late_credit_pct": 2.0, "auto_late_credit": True}
 
 
 # ---------------------------------------------------------------- forecast
@@ -127,6 +128,8 @@ def forecast(data, T, include_buy=True):
         elif p["status"] == "paid":
             add(p.get("paid_date", iso(T)), -p.get("paid_amount", p["amount"]), p["vendor"] + " (paid)", "payable")
     for e in data["cashflow_events"]:
+        if e.get("kind") == "buy_credit" and not include_buy:
+            continue
         add(e["date"], e["amount"], e["label"], e.get("kind", "scheduled"))
 
     biz = data["business"][0] if isinstance(data["business"], list) else data["business"]
@@ -489,3 +492,41 @@ def reminder_draft(action, lang):
          "amt": fmt_money(t["second"]), "date": fmt_date(t["second_date"], lang)}
     s, b = REMINDER_TPL[lang]
     return s.format(**v), b.format(**v)
+
+
+# ---------------------------------------------------------------- buy-side language + late credit
+
+LATE_CREDIT_POLICY = {"pacific": 1.5, "bayside": 1.0, "eastbay": 1.0}  # what each supplier will grant, % of order
+BUY_SIGNS = {"en": "Maria's assistant (on behalf of Maria Alvarez, Bay Remodel Co.)",
+             "es": "Asistente de Maria (en nombre de Maria Alvarez, Bay Remodel Co.)"}
+BUY_TPL = {
+    "rfq": {"en": "Hello {name} team,\n\nCould you quote the following for delivery to the {site} by {deadline}?\n{items}\n\nWe prefer net+10 terms.\n\nThank you,\n{sign}\n\nReply STOP to opt out of these requests.",
+            "es": "Hola equipo de {name}:\n\n\u00bfPodr\u00edan cotizar lo siguiente con entrega en {site} antes del {deadline}?\n{items}\n\nPreferimos condiciones neto+10.\n\nGracias,\n{sign}\n\nResponda STOP para no recibir m\u00e1s solicitudes."},
+    "bay_quote": {"en": "Hi, thanks for asking. We can do the whole list for {total}. Delivery Thursday 11:00 AM, payment due on delivery.\n\nDana, Bayside Building Supply",
+                  "es": "Hola, gracias por escribir. Podemos surtir toda la lista por {total}. Entrega el jueves a las 11:00 AM, pago contra entrega.\n\nDana, Bayside Building Supply"},
+    "ask": {"en": "Hi Dana,\n\nThanks for the quote. Could you deliver by 7:00 AM Thursday, and offer net+10 terms?\n\n{sign}",
+            "es": "Hola Dana:\n\nGracias por la cotizaci\u00f3n. \u00bfPodr\u00edan entregar el jueves antes de las 7:00 AM y ofrecer neto+10?\n\n{sign}"},
+    "bay_final": {"en": "We can make 7:00 AM, but that adds $60 for the early truck, and terms stay due on delivery. New total {total}.\n\nDana",
+                  "es": "Podemos llegar a las 7:00 AM, pero el cami\u00f3n temprano cuesta $60 m\u00e1s y el pago sigue siendo contra entrega. Nuevo total {total}.\n\nDana"},
+    "confirm": {"en": "Maria approved your quote. Please confirm the order.\n\n{sign}",
+                "es": "Maria aprob\u00f3 su cotizaci\u00f3n. Por favor confirmen el pedido.\n\n{sign}"},
+    "counter": {"en": "Hi Dana, could you do {price}?\n\n{sign}", "es": "Hola Dana, \u00bfpodr\u00edan dejarlo en {price}?\n\n{sign}"},
+    "hold": {"en": "Hi Dana,\n\nCould you hold the same list as backup stock for this morning in case our delivery runs late? No commitment yet.\n\n{sign}",
+             "es": "Hola Dana:\n\n\u00bfPodr\u00edan apartar la misma lista como respaldo para esta ma\u00f1ana, por si nuestra entrega se retrasa? A\u00fan sin compromiso.\n\n{sign}"},
+    "credit_ask": {"en": "Hello {name} team,\n\nToday's delivery (ref {ref}) arrived {late} minutes after the agreed 7:00 AM. Would you consider a credit of {ask} on this order?\n\nThank you,\n{sign}",
+                   "es": "Hola equipo de {name}:\n\nLa entrega de hoy (ref. {ref}) lleg\u00f3 {late} minutos despu\u00e9s de las 7:00 AM acordadas. \u00bfPodr\u00edan considerar un cr\u00e9dito de {ask} en este pedido?\n\nGracias,\n{sign}"},
+    "credit_reply": {"en": "Sorry about the delay. We can credit {granted} on this order.\n\n{who}",
+                     "es": "Disculpen el retraso. Podemos acreditar {granted} en este pedido.\n\n{who}"},
+}
+
+
+def buy_text(key, lang, **v):
+    lang = lang if lang in ("en", "es") else "en"
+    return BUY_TPL[key][lang].format(sign=BUY_SIGNS[lang], **v)
+
+
+def late_credit(amount, ask_pct, supplier_id):
+    """Deterministic: ask at Maria's cap; supplier grants up to its policy; never above the ask."""
+    ask = r2(amount * ask_pct / 100)
+    granted_pct = min(ask_pct, LATE_CREDIT_POLICY.get(supplier_id, 1.0))
+    return ask, granted_pct, r2(amount * granted_pct / 100)

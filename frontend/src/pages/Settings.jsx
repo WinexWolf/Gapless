@@ -37,6 +37,11 @@ export default function Settings() {
         <div className="set-row"><div><b>Always require my approval</b><div className="tiny muted">Nothing is sent, accepted or paid without Maria.</div></div><span className="chip chip-green"><Lock size={12} /> Always on</span></div>
       </section>
       <section className="card">
+        <h2 className="h3">Late deliveries</h2>
+        <div className="set-row"><label htmlFor="maxcredit"><b>Max credit to ask for</b><div className="tiny muted">Share of the order. The agent never asks for more.</div></label><div className="suffix"><input id="maxcredit" className="input num" type="number" step="0.5" min="0" max="5" value={s.max_late_credit_pct} onChange={(e) => setS({ ...s, max_late_credit_pct: e.target.value })} data-testid="setting-max-late-credit" /><span>%</span></div></div>
+        <Sw k="auto_late_credit" label="Ask automatically after a late delivery" desc="Credits at or below the ask are accepted, since they only lower what you owe." />
+      </section>
+      <section className="card">
         <h2 className="h3">Messages</h2>
         <div className="set-row"><b>Tone</b><Seg k="tone" opts={[["friendly", "Friendly"], ["firm", "Firm"]]} /></div>
         <div className="set-row"><b>Language</b><Seg k="language" opts={[["en", "English"], ["es", "Español"]]} /></div>

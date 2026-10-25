@@ -1,0 +1,26 @@
+[
+  {
+    "content": "Fix 'Covered ✓' badge readability - replace low-contrast overlay with high-contrast pill",
+    "status": "completed"
+  },
+  {
+    "content": "Make Landing clearly distinct — enhance hero, add gradient, polish stats/CTA",
+    "status": "completed"
+  },
+  {
+    "content": "Overall UI enhancement — card shadows, button polish, celebration PaydayCard",
+    "status": "completed"
+  },
+  {
+    "content": "Link brand to Landing from inside Shell so user can return",
+    "status": "completed"
+  },
+  {
+    "content": "Verify fixes via screenshots at desktop + mobile",
+    "status": "completed"
+  },
+  {
+    "content": "Call testing_agent to verify the Covered badge readability + brand-to-landing fixes",
+    "status": "completed"
+  }
+]

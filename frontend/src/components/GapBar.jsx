@@ -1,4 +1,5 @@
 import React from "react";
+import { CheckCircle2 } from "lucide-react";
 import { money } from "@/lib/api";
 
 const N = 14;
@@ -21,7 +22,11 @@ export default function GapBar({ gap, secured, pending, covered, compact = false
             <div className="plank-pen" style={{ left: `${p.sec * 100}%`, width: `${p.pen * 100}%` }} />
           </div>
         ))}
-        {covered && <div className="covered-badge" data-testid="covered-badge">Covered ✓</div>}
+        {covered && (
+          <div className="covered-badge" data-testid="covered-badge">
+            <span className="covered-badge-pill"><CheckCircle2 size={18} aria-hidden="true" /> Covered</span>
+          </div>
+        )}
       </div>
       {!compact && (
         <div className="gap-legend">

@@ -66,7 +66,8 @@ async def get_settings():
     if not s:
         s = dict(E.DEFAULT_SETTINGS)
         await db.settings.insert_one(dict(s))
-    return s
+        s.pop("_id", None)
+    return {**E.DEFAULT_SETTINGS, **s}
 
 
 # ------------------------------------------------------------------ seed / reset
@@ -467,6 +468,30 @@ async def mark_paid(aid: str):
     return {"ok": True}
 
 
+async def record_second_payment(a, method):
+    t = a["terms"]
+    if a["type"] != "split" or a["status"] != "paid" or t.get("second_paid"):
+        raise HTTPException(400, "The second payment isn't open")
+    amt = E.r2(t["second"])
+    await db.payments.insert_one({"id": uid("pmt"), "date": E.iso(today()), "amount": amt,
+                                  "label": f"{a['counterparty']} 2nd payment", "action_id": a["id"],
+                                  "receivable_id": a["target_id"], "method": method})
+    await db.cashflow_events.delete_one({"id": f"cf_inst_{a['id']}"})
+    await db.receivables.update_one({"id": a["target_id"]}, {"$set": {"status": "paid", "paid_amount": a["invoice_amount"]}})
+    await db.actions.update_one({"id": a["id"]}, {"$set": {"terms.second_paid": True, "terms.second_paid_on": E.iso(today()),
+                                                           "secured_amount": E.r2(a["secured_amount"] + amt)}})
+    await db.reminders.update_many({"action_id": a["id"], "status": {"$ne": "sent"}}, {"$set": {"status": "cancelled"}})
+    await add_msg(a["id"], a["counterparty"], "them", "paid",
+                  f"Paid the second {E.fmt_money(amt)} via {method}, ahead of {E.fmt_date(t['second_date'])}. Invoice settled in full.")
+    await log_activity(f"Cash received: {a['counterparty']} paid the second {E.fmt_money(amt)} early ({method})", "secured", amt)
+
+
+@api.post("/actions/{aid}/mark-second-paid")
+async def mark_second_paid(aid: str):
+    await record_second_payment(await get_action(aid), "Mark as paid (demo)")
+    return {"ok": True}
+
+
 def apply_counter_terms(a, pc, T):
     t = dict(a["terms"])
     upd = {}
@@ -527,7 +552,8 @@ async def offer_public(token):
     elif a["type"] == "early_pay":
         summary.update(discount_pct=t["discount_pct"], expires=t["expires"], amount_due=a["cash_by_deadline"])
     elif a["type"] == "split":
-        summary.update(first=t["first"], second=t["second"], second_date=t["second_date"], amount_due=t["first"])
+        summary.update(first=t["first"], second=t["second"], second_date=t["second_date"], amount_due=t["first"],
+                       second_paid=bool(t.get("second_paid")), second_open=a["status"] == "paid" and not t.get("second_paid"))
     else:
         summary.update(fee_pct=t["fee_pct"], fee=E.r2(a["invoice_amount"] * t["fee_pct"] / 100), new_due=t["new_due"])
     hist = await all_docs("messages", {"thread_id": a["id"], "side": {"$in": ["us", "them"]}}, ("ts", 1))
@@ -636,23 +662,31 @@ async def payments_checkout(payload: dict = Body(...)):
     offer = await db.offers.find_one({"token": token}, NO_ID)
     if not offer:
         raise HTTPException(404, "Offer not found")
-    if offer["status"] != "accepted":
-        raise HTTPException(400, "Accept the offer before paying")
     a = await get_action(offer["action_id"])
-    amount = E.r2(a["cash_by_deadline"])
+    part = "second" if payload.get("part") == "second" else "main"
+    if part == "second":
+        if a["type"] != "split" or a["status"] != "paid" or a["terms"].get("second_paid"):
+            raise HTTPException(400, "The second payment isn't open")
+        amount = E.r2(a["terms"]["second"])
+    else:
+        if offer["status"] != "accepted":
+            raise HTTPException(400, "Accept the offer before paying")
+        amount = E.r2(a["cash_by_deadline"])
+    label = " · 2nd payment" if part == "second" else ""
     try:
         s = await asyncio.to_thread(
             stripe.checkout.Session.create, mode="payment",
             line_items=[{"price_data": {"currency": "usd", "unit_amount": int(round(amount * 100)),
-                                        "product_data": {"name": f"{E.BUSINESS_NAME} · invoice {a['invoice_number']} (TEST)"}},
+                                        "product_data": {"name": f"{E.BUSINESS_NAME} · invoice {a['invoice_number']}{label} (TEST)"}},
                          "quantity": 1}],
             success_url=f"{origin}/o/{token}?session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{origin}/o/{token}?cancelled=1",
-            metadata={"token": token, "action_id": a["id"]})
+            metadata={"token": token, "action_id": a["id"], "part": part})
     except Exception as e:
         log.warning("stripe checkout failed: %s", e)
         raise HTTPException(502, "Stripe test checkout is unavailable. Use 'Mark as paid (demo)'.")
     await db.payment_transactions.insert_one({"session_id": s.id, "token": token, "action_id": a["id"], "amount": amount,
+                                              "part": part,
                                               "currency": "usd", "status": "initiated", "payment_status": "pending",
                                               "created_at": now_iso()})
     return {"url": s.url, "session_id": s.id}
@@ -671,7 +705,10 @@ async def settle_session(session_id):
                     {"$set": {"status": "complete", "payment_status": "paid", "updated_at": now_iso()}})
                 if res.modified_count:
                     a = await get_action(tx["action_id"])
-                    await record_payment(a, "Card · Stripe test checkout")
+                    if tx.get("part") == "second":
+                        await record_second_payment(a, "Card · Stripe test checkout")
+                    else:
+                        await record_payment(a, "Card · Stripe test checkout")
             elif s.status == "expired":
                 await db.payment_transactions.update_one({"session_id": session_id}, {"$set": {"status": "expired"}})
         except stripe.error.StripeError as e:
@@ -782,7 +819,12 @@ async def write_settings(payload: dict = Body(...)):
         upd["tone"] = payload["tone"]
     if payload.get("language") in ("en", "es"):
         upd["language"] = payload["language"]
-    for k in ("supplier_has_ai", "llm_force_fail"):
+    if "max_late_credit_pct" in payload:
+        v = float(payload["max_late_credit_pct"])
+        if not 0 <= v <= 5:
+            raise HTTPException(400, "max_late_credit_pct must be between 0 and 5")
+        upd["max_late_credit_pct"] = v
+    for k in ("supplier_has_ai", "llm_force_fail", "auto_late_credit"):
         if k in payload:
             upd[k] = bool(payload[k])
     upd["require_approval"] = True  # always, enforced in code
@@ -816,7 +858,7 @@ async def threads():
         offer = await db.offers.find_one({"token": a.get("offer_token")}, NO_ID) if a.get("offer_token") else None
         out.append({**t, "status": a["status"], "type_label": E.TYPE_LABEL[a["type"]], "token": a.get("offer_token"),
                     "cash": a["cash_by_deadline"], "pending_counter": (offer or {}).get("pending_counter"),
-                    "sim_order": E.SIM_ORDER[a["type"]],
+                    "sim_order": E.SIM_ORDER[a["type"]], "second_paid": bool(a["terms"].get("second_paid")),
                     "messages": await all_docs("messages", {"thread_id": t["id"]}, ("ts", 1))})
     out.sort(key=lambda x: x["sim_order"])
     return {"threads": out}
@@ -891,7 +933,8 @@ async def create_seed_request(email=None, items=None, max_total=3600.0, source="
     req = {"id": uid("req"), "stage": "request", "round": 0, "email": email or E.SEED_REQUEST_EMAIL,
            "inbox": "orders@bayremodel.gapless.app", "items": items or [dict(x) for x in E.SEED_ITEMS],
            "mandate": mandate_for(T, max_total), "parse_source": source, "selected": None, "pay_choice": None,
-           "spend_request": None, "created_at": now_iso()}
+           "spend_request": None, "created_at": now_iso(),
+           "supplier_lang": {s["id"]: "en" for s in E.SUPPLIERS}}
     await db.purchase_requests.insert_one(dict(req))
     return req
 
@@ -1011,9 +1054,7 @@ async def buy_start(rid: str):
                            "terms_requested": "net+10", "deadline": m["latest_delivery"], "deliver_to": m["site"]})
         else:
             await rfq_msg(rid, s["id"], "Maria's assistant", "us",
-                          f"Hello {s['name']} team,\n\nCould you quote the following for delivery to the {m['site']} by "
-                          f"{m['latest_delivery']}?\n{item_txt}\n\nWe prefer net+10 terms.\n\nThank you,\n{BUY_SIGN}\n\n"
-                          f"Reply STOP to opt out of these requests.")
+                          E.buy_text("rfq", slang(req, s["id"]), name=s["name"], site=m["site"], deadline=m["latest_delivery"], items=item_txt))
     await db.purchase_requests.update_one({"id": rid}, {"$set": {"stage": "sourcing", "round": 0}})
     await log_activity("Sourcing started: quote requests sent (simulated) to 3 saved suppliers", "buy", scope="buy")
     return await buy_current()
@@ -1079,8 +1120,7 @@ async def buy_advance(rid: str):
                       {"type": "quote", "lines": pl, "price": E.lines_total(pl), "terms": "net+10", "deadline": m["latest_delivery"]})
         bl = E.price_lines(items, E.PRICES[("bayside", "quote")])
         await rfq_msg(rid, "bayside", "Dana at Bayside Building Supply", "them",
-                      f"Hi, thanks for asking. We can do the whole list for {E.fmt_money(E.lines_total(bl))}. Delivery Thursday "
-                      f"11:00 AM, payment due on delivery.\n\nDana, Bayside Building Supply")
+                      E.buy_text("bay_quote", slang(req, "bayside"), total=E.fmt_money(E.lines_total(bl))))
         await rfq_msg(rid, "eastbay", "System", "system", "Waiting for a reply…")
         await db.rfq_threads.update_many({"request_id": rid, "supplier_id": {"$in": ["pacific", "bayside"]}}, {"$set": {"status": "quoted"}})
     elif rnd == 2:
@@ -1094,17 +1134,15 @@ async def buy_advance(rid: str):
                       {"type": "counter", "price": counter, "terms": "net+10", "deadline": m["latest_delivery"]})
         await rfq_msg(rid, "bayside", "Rule check (code)", "code",
                       f"Thursday 11:00 AM misses the {m['deliver_by_time']} deadline; asking for 7:00 AM and net+10.", internal=True)
-        await rfq_msg(rid, "bayside", "Maria's assistant", "us",
-                      f"Hi Dana,\n\nThanks for the quote. Could you deliver by 7:00 AM Thursday, and offer net+10 terms?\n\n"
-                      f"{BUY_SIGN}")
+        await rfq_msg(rid, "bayside", "Maria's assistant", "us", E.buy_text("ask", slang(req, "bayside")))
         await db.rfq_threads.update_many({"request_id": rid, "supplier_id": {"$in": ["pacific", "bayside"]}}, {"$set": {"status": "negotiating"}})
     else:
         fl = E.price_lines(items, E.PRICES[("pacific", "final")])
         await rfq_msg(rid, "pacific", "Pacific Lumber agent", "them", f"Final: {E.fmt_money(E.lines_total(fl))}, net+10, delivery {m['latest_delivery']}.",
                       {"type": "final", "lines": fl, "price": E.lines_total(fl), "terms": "net+10", "deadline": m["latest_delivery"]})
         await rfq_msg(rid, "bayside", "Dana at Bayside Building Supply", "them",
-                      "We can make 7:00 AM, but that adds $60 for the early truck, and terms stay due on delivery. "
-                      f"New total {E.fmt_money(E.lines_total(E.price_lines(items, E.PRICES[('bayside', 'quote')])) + 60)}.\n\nDana")
+                      E.buy_text("bay_final", slang(req, "bayside"),
+                                 total=E.fmt_money(E.lines_total(E.price_lines(items, E.PRICES[('bayside', 'quote')])) + 60)))
         await rfq_msg(rid, "eastbay", "System", "system", "No reply after 2 hours. Excluded from the comparison.")
         await db.rfq_threads.update_many({"request_id": rid, "supplier_id": {"$in": ["pacific", "bayside"]}}, {"$set": {"status": "final"}})
         await db.rfq_threads.update_one({"request_id": rid, "supplier_id": "eastbay"}, {"$set": {"status": "excluded"}})
@@ -1137,7 +1175,7 @@ async def buy_counter(rid: str, payload: dict = Body(...)):
     if sid == "pacific":
         await rfq_msg(rid, sid, "Maria's assistant", "us", f"Counter: {E.fmt_money(price)}.", {"type": "counter", "price": price, "terms": "net+10"})
     else:
-        await rfq_msg(rid, sid, "Maria's assistant", "us", f"Hi Dana, could you do {E.fmt_money(price)}?\n\n{BUY_SIGN}")
+        await rfq_msg(rid, sid, "Maria's assistant", "us", E.buy_text("counter", slang(req, sid), price=E.fmt_money(price)))
     return await buy_current()
 
 
@@ -1157,7 +1195,8 @@ async def buy_approve_quote(rid: str, payload: dict = Body(...)):
         raise HTTPException(400, f"Blocked by code: {E.fmt_money(q['total'])} is above your {E.fmt_money(req['mandate']['max_total'])} limit")
     await db.payables.insert_one({"id": f"pay_mat_{rid}", "vendor": f"{q['supplier_name']} (materials)", "number": "PO-" + rid[-5:].upper(),
                                   "amount": q["total"], "due_date": q["due_date"], "status": "scheduled", "kind": "materials"})
-    await rfq_msg(rid, sid, "Maria's assistant", "us", "Maria approved your quote. Please confirm the order.",
+    await rfq_msg(rid, sid, "Maria's assistant", "us",
+                  "Maria approved your quote. Please confirm the order." if sid == "pacific" else E.buy_text("confirm", slang(req, sid)),
                   {"type": "order", "price": q["total"], "terms": q["terms"]} if sid == "pacific" else None)
     if sid == "pacific":
         T = today()
@@ -1259,7 +1298,92 @@ async def ship_advance(rid: str):
     await db.shipments.update_one({"request_id": rid}, {"$set": upd, "$push": {"history": {"step": step, "label": E.SHIP_STEPS[step], "ts": now_iso()}}})
     if step == 4:
         await log_activity(f"Delivered to the Nguyen Kitchen job site (ref {s['ref']})", "buy", scope="buy")
+        settings = await get_settings()
+        if s.get("delayed") and settings.get("auto_late_credit") and not s.get("credit"):
+            await request_late_credit(await get_req(rid), {**s, "step": 4}, settings)
     return await buy_current()
+
+
+async def request_late_credit(req, s, settings):
+    rid, sid = req["id"], req["selected"]
+    sr = req["spend_request"]
+    cap = float(settings.get("max_late_credit_pct", 0))
+    if cap <= 0:
+        await rfq_msg(rid, sid, "Rule check (code)", "code", "Late-delivery credit limit is 0%, so the agent did not ask.", internal=True)
+        return
+    ask, gpct, granted = E.late_credit(sr["amount"], cap, sid)
+    lang = slang(req, sid)
+    name = s["supplier_name"]
+    await rfq_msg(rid, sid, "Rule check (code)", "code",
+                  f"Truck arrived 30 min late. Asking {E.fmt_money(ask)} ({cap}%), within your {cap}% late-delivery credit limit.", internal=True)
+    if sid == "pacific":
+        await rfq_msg(rid, sid, "Maria's assistant", "us", "Late-delivery credit request.",
+                      {"type": "credit_request", "ref": s["ref"], "minutes_late": 30, "amount": ask})
+        await rfq_msg(rid, sid, "Pacific Lumber agent", "them", f"Credit offered: {E.fmt_money(granted)}.",
+                      {"type": "credit_offer", "ref": s["ref"], "amount": granted, "pct": gpct})
+    else:
+        await rfq_msg(rid, sid, "Maria's assistant", "us", E.buy_text("credit_ask", lang, name=name, ref=s["ref"], late=30, ask=E.fmt_money(ask)))
+        await rfq_msg(rid, sid, f"Dana at {name}", "them", E.buy_text("credit_reply", lang, granted=E.fmt_money(granted), who=f"Dana, {name}"))
+    pay_id = f"pay_mat_{rid}"
+    pay = await db.payables.find_one({"id": pay_id}, NO_ID)
+    if pay and pay["status"] == "scheduled":
+        await db.payables.update_one({"id": pay_id}, {"$set": {"amount": E.r2(pay["amount"] - granted)}})
+        applied = f"taken off the {E.fmt_date(pay['due_date'])} payment"
+    else:
+        await db.cashflow_events.insert_one({"id": f"cf_credit_{rid}", "date": E.iso(today()), "amount": granted,
+                                             "label": f"{name} late-delivery credit", "kind": "buy_credit"})
+        applied = "refunded to the one-time card"
+    await rfq_msg(rid, sid, "Rule check (code)", "code",
+                  f"{E.fmt_money(granted)} is at or below the ask, so it was accepted automatically (a credit only lowers what you owe).", internal=True)
+    await db.shipments.update_one({"request_id": rid}, {"$set": {"credit": {
+        "asked": ask, "ask_pct": cap, "granted": granted, "granted_pct": gpct, "applied": applied}}})
+    await log_activity(f"Late-delivery credit: asked {name} for {E.fmt_money(ask)}, got {E.fmt_money(granted)} ({applied})",
+                       "buy", granted, "buy")
+
+
+def slang(req, sid):
+    return (req.get("supplier_lang") or {}).get(sid, "en")
+
+
+@api.post("/buy/{rid}/supplier-language")
+async def buy_supplier_language(rid: str, payload: dict = Body(...)):
+    await get_req(rid)
+    sid, lang = payload.get("supplier_id"), payload.get("language")
+    if sid not in [s["id"] for s in E.SUPPLIERS] or lang not in ("en", "es"):
+        raise HTTPException(400, "Pick a saved supplier and en/es")
+    await db.purchase_requests.update_one({"id": rid}, {"$set": {f"supplier_lang.{sid}": lang}})
+    return await buy_current()
+
+
+@api.get("/digest")
+async def weekly_digest():
+    await ensure_seed()
+    T = today()
+    data, actions, fc, st = await status_bundle()
+    F = E.friday_for(T)
+    mon, sun = F - timedelta(days=4), F + timedelta(days=2)
+    week_items = [x for x in fc["items"] if E.iso(mon) <= x["date"] <= E.iso(sun)]
+    opens = [{"counterparty": a["counterparty"], "type_label": E.TYPE_LABEL[a["type"]], "amount": a["cash_by_deadline"],
+              "status": a["status"]} for a in sorted(actions, key=lambda a: a["rank"]) if a["status"] in E.ACTIVE_STATES]
+    drafts = [a["counterparty"] for a in actions if a["status"] == "proposed" and a.get("selected")]
+    horizon = E.iso(F + timedelta(days=14))
+    sup = sorted([{"vendor": p["vendor"], "amount": p["amount"], "due_date": p["due_date"], "kind": p.get("kind")}
+                  for p in data["payables"] if p["status"] == "scheduled" and p.get("kind") != "payroll"
+                  and E.iso(T) <= p["due_date"] <= horizon], key=lambda p: p["due_date"])
+    rems = [r for r in await all_docs("reminders", None, ("send_on", 1)) if r["status"] in ("draft", "approved")]
+    headline = (f"Payroll on {fc['friday_label']} is covered with {E.fmt_money(st['spare'])} to spare." if st["covered"]
+                else f"Short {E.fmt_money(st['remaining'])} for payroll on {fc['friday_label']}.")
+    lines = [f"Monday digest · week of {E.fmt_date(mon)} · {E.BUSINESS_NAME}", headline,
+             f"Friday projected balance: {E.fmt_money(fc['friday_balance'])}. Lowest point next 4 weeks: "
+             f"{E.fmt_money(fc['lowest']['balance'])} on {E.fmt_date(fc['lowest']['date'])}.",
+             f"Open offers ({len(opens)}): " + ("; ".join(f"{o['counterparty']} {E.fmt_money(o['amount'])} ({o['status']})" for o in opens) or "none"),
+             f"Drafts waiting for your approval: {', '.join(drafts) or 'none'}",
+             "Upcoming supplier payments: " + ("; ".join(f"{p['vendor']} {E.fmt_money(p['amount'])} on {E.fmt_date(p['due_date'])}" for p in sup) or "none"),
+             "Gapless · demo, synthetic data"]
+    return {"week_of": E.iso(mon), "week_label": f"Week of {E.fmt_date(mon)}", "headline": headline, "status": st,
+            "friday_label": fc["friday_label"], "friday_balance": fc["friday_balance"], "lowest": fc["lowest"],
+            "week_items": week_items, "open_offers": opens, "drafts": drafts, "supplier_payments": sup,
+            "reminders": rems, "text": "\n".join(lines)}
 
 
 @api.post("/buy/{rid}/shipment/delay")
@@ -1280,8 +1404,7 @@ async def ship_backup(rid: str, payload: dict = Body(...)):
     if choice == "hold":
         await db.outbox.insert_one({"id": uid("out"), "ts": now_iso(), "to": "sales@baysidebuilding.example",
                                     "counterparty": "Bayside Building Supply", "subject": "Backup stock hold · Nguyen Kitchen",
-                                    "body": f"Hi Dana,\n\nCould you hold the same list as backup stock for this morning in case our "
-                                            f"delivery runs late? No commitment yet.\n\n{BUY_SIGN}", "link": None,
+                                    "body": E.buy_text("hold", slang(await get_req(rid), "bayside")), "link": None,
                                     "channel": "email", "scope": "buy", "simulated": True})
         text = "Asked Bayside to hold backup stock (simulated)."
     else:
