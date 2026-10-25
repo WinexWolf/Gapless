@@ -240,3 +240,49 @@ def test_delay_raises_alert_and_receipt_matches():
         post(f"/buy/{rid}/shipment/advance")
     cur = post(f"/buy/{rid}/receipt/match").json()
     assert cur["shipment"]["matched"]["ok"] and cur["request"]["stage"] == "done"
+    sc = {c["supplier_id"]: c for c in get("/suppliers/scorecard")["cards"]}
+    assert sc["pacific"]["orders"] == 26 and sc["pacific"]["on_time_count"] == 24 and sc["pacific"]["on_time_pct"] == 92
+    assert sc["pacific"]["recent"][0]["minutes_late"] == 30 and sc["eastbay"]["rfqs"] == 11 and sc["eastbay"]["replies"] == 6
+
+
+# v2 features ----------------------------------------------------------
+def test_spanish_offer_link_from_outbox():
+    post("/actions/act_patel/draft", {"language": "es", "tone": "friendly"})
+    r = post("/actions/act_patel/approve", {"origin_url": ORIGIN}).json()
+    assert r["link"].endswith("?lang=es")
+    item = get("/outbox")["items"][0]
+    assert item["language"] == "es" and item["link"].endswith("?lang=es") and "Asistente de cobros" in item["body"]
+    assert get(f"/offers/{r['token']}")["language"] == "es"
+
+
+def test_second_payment_reminder():
+    post("/actions/approve-all", {"origin_url": ORIGIN})
+    assert get("/reminders")["items"] == []
+    post("/actions/act_johnson/mark-paid")
+    rem = get("/reminders")["items"]
+    assert len(rem) == 1 and rem[0]["amount"] == 3100.0 and rem[0]["status"] == "draft"
+    assert E.d(rem[0]["due_date"]) - E.d(rem[0]["send_on"]) == timedelta(days=3)
+    assert post(f"/reminders/{rem[0]['id']}/send", ok=False).status_code == 400  # approval first
+    post(f"/reminders/{rem[0]['id']}/approve")
+    post(f"/reminders/{rem[0]['id']}/send")
+    assert get("/reminders")["items"][0]["status"] == "sent"
+    assert any("second payment" in o["subject"] for o in get("/outbox")["items"])
+
+
+def test_payday_summary():
+    post("/actions/approve-all", {"origin_url": ORIGIN})
+    assert not get("/summary")["covered"]
+    for _ in range(4):
+        post("/demo/simulate-next")
+    s = get("/summary")
+    assert s["covered"] and s["total_cost"] == 102.75 and s["secured"] == 15528.0 and s["spare"] == 5728.0
+    assert len(s["items"]) == 4 and "Payroll covered" in s["text"]
+
+
+def test_scorecard_drives_quotes():
+    sc = {c["supplier_id"]: c for c in get("/suppliers/scorecard")["cards"]}
+    assert (sc["pacific"]["on_time_pct"], sc["bayside"]["on_time_pct"], sc["eastbay"]["on_time_pct"]) == (96, 88, 91)
+    run_sourcing()
+    q = {x["supplier_id"]: x for x in get("/buy/current")["quotes"]}
+    assert q["pacific"]["on_time"] == 96 and q["bayside"]["on_time"] == 88
+    assert q["pacific"]["reliability_risk"] == 0 and q["bayside"]["reliability_risk"] == 117.95

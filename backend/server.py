@@ -31,7 +31,7 @@ log = logging.getLogger("gapless")
 
 DEMO_COLLECTIONS = ["business", "receivables", "payables", "cashflow_events", "actions", "threads", "messages",
                     "offers", "payments", "settings", "activity_log", "purchase_requests", "rfq_threads", "quotes",
-                    "shipments", "outbox", "payment_transactions"]
+                    "shipments", "outbox", "payment_transactions", "reminders", "supplier_history"]
 NO_ID = {"_id": 0}
 BUY_SIGN = "Maria's assistant (on behalf of Maria Alvarez, Bay Remodel Co.)"
 _lock = asyncio.Lock()
@@ -93,6 +93,7 @@ async def reset_demo():
         "explanation": E.plan_explanation(ordered, st["gap"], target, total, E.friday_for(T)),
         "explanation_source": "template"}})
     await create_seed_request()
+    await db.supplier_history.insert_many([dict(h) for h in E.supplier_history_seed(T)])
     await log_activity("Demo loaded: synthetic data for Bay Remodel Co.", "system")
 
 
@@ -261,8 +262,9 @@ async def approve_one(aid, payload):
         raise HTTPException(400, "Blocked by a guardrail: " + "; ".join(c["text"] for c in checks if not c["ok"]))
     origin = (payload.get("origin_url") or "").rstrip("/")
     token = secrets.token_urlsafe(18)
-    link = f"{origin}/o/{token}"
     d = a["draft"]
+    lang = d.get("language", "en")
+    link = f"{origin}/o/{token}" + ("?lang=es" if lang == "es" else "")
     subject = payload.get("subject") or d["subject"]
     body = (payload.get("body") or d["body"]).replace(E.LINK_PH, link)
     if link not in body:
@@ -272,7 +274,7 @@ async def approve_one(aid, payload):
                                 "created_at": now_iso(), "pending_counter": None})
     await db.outbox.insert_one({"id": uid("out"), "ts": now_iso(), "to": a["contact"], "counterparty": a["counterparty"],
                                 "subject": subject, "body": body, "link": link, "channel": "email", "scope": "payroll",
-                                "action_id": aid, "simulated": True})
+                                "action_id": aid, "simulated": True, "language": lang})
     badge = "Agent <-> Agent" if (a["type"] == "extension" and settings.get("supplier_has_ai")) else "Agent <-> Human"
     await db.threads.update_one({"id": aid}, {"$set": {"id": aid, "action_id": aid, "counterparty": a["counterparty"],
                                                        "type": a["type"], "badge": badge}}, upsert=True)
@@ -308,6 +310,7 @@ async def record_payment(a, method):
     if a["type"] == "split":
         await ensure_installment(a)
         await db.receivables.update_one({"id": a["target_id"]}, {"$set": {"status": "split", "paid_amount": amount}})
+        await create_reminder(a)
     else:
         await db.receivables.update_one({"id": a["target_id"]}, {"$set": {"status": "paid", "paid_amount": amount}})
     await db.actions.update_one({"id": a["id"]}, {"$set": {"status": "paid", "secured_amount": amount}})
@@ -316,6 +319,103 @@ async def record_payment(a, method):
     extra = f" Second {E.fmt_money(a['terms']['second'])} scheduled for {E.fmt_date(a['terms']['second_date'])}." if a["type"] == "split" else ""
     await add_msg(a["id"], a["counterparty"], "them", "paid", f"Paid {E.fmt_money(amount)} via {method}.{extra}")
     await log_activity(f"Money secured: {a['counterparty']} paid {E.fmt_money(amount)} ({method})", "secured", amount)
+
+
+async def create_reminder(a):
+    if await db.reminders.find_one({"action_id": a["id"]}):
+        return
+    lang = (a.get("draft") or {}).get("language", "en")
+    subject, body = E.reminder_draft(a, lang)
+    send_on = max(today(), E.d(a["terms"]["second_date"]) - timedelta(days=E.REMINDER_DAYS_BEFORE))
+    await db.reminders.insert_one({"id": uid("rem"), "action_id": a["id"], "counterparty": a["counterparty"],
+                                   "contact": a.get("contact", ""), "amount": a["terms"]["second"],
+                                   "due_date": a["terms"]["second_date"], "send_on": E.iso(send_on), "language": lang,
+                                   "subject": subject, "body": body, "status": "draft", "created_at": now_iso()})
+    await add_msg(a["id"], "Scheduler", "code", "reminder",
+                  f"Gentle reminder for the second {E.fmt_money(a['terms']['second'])} drafted for {E.fmt_date(send_on)} "
+                  f"({E.REMINDER_DAYS_BEFORE} days before it's due). Waiting for Maria's approval.")
+
+
+@api.get("/reminders")
+async def list_reminders():
+    await ensure_seed()
+    return {"items": await all_docs("reminders", None, ("send_on", 1))}
+
+
+async def get_reminder(rid):
+    r = await db.reminders.find_one({"id": rid}, NO_ID)
+    if not r:
+        raise HTTPException(404, "Reminder not found")
+    return r
+
+
+@api.put("/reminders/{rid}")
+async def edit_reminder(rid: str, payload: dict = Body(...)):
+    r = await get_reminder(rid)
+    if r["status"] == "sent":
+        raise HTTPException(400, "Already sent")
+    upd = {k: str(payload[k])[:4000] for k in ("subject", "body") if payload.get(k)}
+    if upd.get("body"):
+        upd["body"] = E.ensure_safety(upd["body"], r["language"])
+    await db.reminders.update_one({"id": rid}, {"$set": upd})
+    return await get_reminder(rid)
+
+
+@api.post("/reminders/{rid}/approve")
+async def approve_reminder(rid: str):
+    r = await get_reminder(rid)
+    if r["status"] != "draft":
+        raise HTTPException(400, f"Reminder is {r['status']}")
+    await db.reminders.update_one({"id": rid}, {"$set": {"status": "approved", "approved_at": now_iso()}})
+    await add_msg(r["action_id"], "Maria", "maria", "approved", f"Maria approved the reminder for {E.fmt_date(r['send_on'])}.")
+    await log_activity(f"Reminder to {r['counterparty']} approved for {E.fmt_date(r['send_on'])}", "approve")
+    return await get_reminder(rid)
+
+
+@api.post("/reminders/{rid}/send")
+async def send_reminder(rid: str):
+    r = await get_reminder(rid)
+    if r["status"] != "approved":
+        raise HTTPException(400, "Maria must approve the reminder first")
+    await db.outbox.insert_one({"id": uid("out"), "ts": now_iso(), "to": r["contact"], "counterparty": r["counterparty"],
+                                "subject": r["subject"], "body": r["body"], "link": None, "channel": "email",
+                                "scope": "payroll", "action_id": r["action_id"], "simulated": True, "language": r["language"]})
+    await db.reminders.update_one({"id": rid}, {"$set": {"status": "sent", "sent_at": now_iso()}})
+    await add_msg(r["action_id"], "Maria's billing assistant", "us", "reminder", f"{r['subject']}\n\n{r['body']}")
+    await log_activity(f"Reminder sent (simulated) to {r['counterparty']} for {E.fmt_money(r['amount'])}", "reminder")
+    return await get_reminder(rid)
+
+
+@api.get("/summary")
+async def payday_summary():
+    await ensure_seed()
+    data, actions, fc, st = await status_bundle()
+    items = []
+    for a in sorted(actions, key=lambda x: x["rank"]):
+        if a["status"] not in E.SECURED_STATES:
+            continue
+        if a["type"] == "split":
+            note = f"+ {E.fmt_money(a['terms']['second'])} on {E.fmt_date(a['terms']['second_date'])}"
+        elif a["type"] == "extension":
+            note = f"moved to {E.fmt_date(a['terms']['new_due'])}"
+        elif a["type"] == "early_pay":
+            note = f"{a['terms']['discount_pct']}% early-pay discount"
+        else:
+            note = "paid after a reminder"
+        items.append({"counterparty": a["counterparty"], "type_label": E.TYPE_LABEL[a["type"]],
+                      "amount": a["secured_amount"], "cost": a["cost"], "note": note})
+    total_cost = E.r2(sum(i["cost"] for i in items))
+    pct = round(total_cost / st["gap"] * 100, 2) if st["gap"] else 0
+    payroll = next((p["amount"] for p in data["payables"] if p.get("kind") == "payroll"), 0)
+    lines = [f"Payroll covered \u2713 \u00b7 {E.BUSINESS_NAME}",
+             f"{fc['friday_label']} payroll ({E.fmt_money(payroll)}) is covered with {E.fmt_money(st['spare'])} to spare.",
+             f"Secured {E.fmt_money(st['secured'])} against a {E.fmt_money(st['gap'])} gap:"]
+    lines += [f"\u2022 {i['counterparty']} ({i['type_label']}): {E.fmt_money(i['amount'])}, cost {E.fmt_money(i['cost'])}, {i['note']}" for i in items]
+    lines += [f"Total cost to close the gap: {E.fmt_money(total_cost)} ({pct}% of the gap).",
+              f"Friday projected balance: {E.fmt_money(fc['friday_balance'])}.", "Gapless \u00b7 demo, synthetic data"]
+    return {"covered": st["covered"], "friday_label": fc["friday_label"], "payroll": payroll, "gap": st["gap"],
+            "secured": st["secured"], "spare": st["spare"], "friday_balance": fc["friday_balance"], "items": items,
+            "total_cost": total_cost, "cost_pct": pct, "text": "\n".join(lines)}
 
 
 async def ensure_installment(a):
@@ -919,14 +1019,28 @@ async def buy_start(rid: str):
     return await buy_current()
 
 
+@api.get("/suppliers/scorecard")
+async def supplier_scorecard():
+    await ensure_seed()
+    cards = [E.scorecard(h) for h in await all_docs("supplier_history")]
+    order = {s["id"]: i for i, s in enumerate(E.SUPPLIERS)}
+    cards.sort(key=lambda c: order.get(c["supplier_id"], 9))
+    return {"cards": cards, "rule": (f"Recommendation = least cash due before Friday, then lowest effective cost. Effective cost adds "
+                                     f"{E.RELIABILITY_RATE * 100}% of the price for each on-time point below {E.RELIABILITY_TARGET}%. "
+                                     f"Every finished order updates this record.")}
+
+
 async def make_quotes(req):
     T = today()
+    hist = {h["supplier_id"]: E.scorecard(h) for h in await all_docs("supplier_history")}
     F = E.friday_for(T)
     thu = F - timedelta(days=1)
     items = req["items"]
     pac_lines = E.price_lines(items, E.PRICES[("pacific", "final")])
     bay_lines = E.price_lines(items, E.PRICES[("bayside", "quote")]) + [
         {"name": "Early delivery (7:00 AM)", "qty": 1, "unit": "fee", "unit_price": 60.0, "total": 60.0}]
+    first = {"pacific": E.lines_total(E.price_lines(items, E.PRICES[("pacific", "quote")])),
+             "bayside": E.lines_total(E.price_lines(items, E.PRICES[("bayside", "quote")]))}
     qs = [("pacific", pac_lines, "net+10", E.iso(thu + timedelta(days=10)), "7:00 AM"),
           ("bayside", bay_lines, "due on delivery", E.iso(thu), "7:00 AM")]
     out = []
@@ -934,14 +1048,18 @@ async def make_quotes(req):
         s = next(x for x in E.SUPPLIERS if x["id"] == sid)
         total = E.lines_total(lines)
         before_fri = E.d(due) <= F
+        sc = hist.get(sid) or {}
+        on_time = sc.get("on_time_pct", s["on_time"])
+        risk, eff = E.reliability_adjust(total, on_time)
         out.append({"id": uid("q"), "request_id": req["id"], "supplier_id": sid, "supplier_name": s["name"], "lane": s["lane"],
                     "lines": lines, "total": total, "terms": terms, "due_date": due, "delivery": f"{E.fmt_date(thu)} · {time}",
-                    "on_time": s["on_time"], "cash_before_friday": total if before_fri else 0.0,
+                    "on_time": on_time, "orders_on_record": sc.get("orders", 0), "late_recent": sc.get("late_recent", 0),
+                    "reliability_risk": risk, "effective_total": eff, "first_quote": first[sid], "cash_before_friday": total if before_fri else 0.0,
                     "cash_impact": (f"{E.fmt_money(total)} due {E.fmt_date(due)}, before payroll" if before_fri else "$0 before Friday"),
                     "impact_bad": before_fri, "within_mandate": total <= req["mandate"]["max_total"]})
     eligible = [q for q in out if q["within_mandate"]]
     if eligible:
-        best = min(eligible, key=lambda q: (q["cash_before_friday"], q["total"]))
+        best = min(eligible, key=lambda q: (q["cash_before_friday"], q["effective_total"]))
         best["recommended"] = True
     for q in out:
         q.setdefault("recommended", False)
@@ -990,6 +1108,8 @@ async def buy_advance(rid: str):
         await rfq_msg(rid, "eastbay", "System", "system", "No reply after 2 hours. Excluded from the comparison.")
         await db.rfq_threads.update_many({"request_id": rid, "supplier_id": {"$in": ["pacific", "bayside"]}}, {"$set": {"status": "final"}})
         await db.rfq_threads.update_one({"request_id": rid, "supplier_id": "eastbay"}, {"$set": {"status": "excluded"}})
+        await db.supplier_history.update_many({"supplier_id": {"$in": ["pacific", "bayside"]}}, {"$inc": {"rfqs": 1, "replies": 1}})
+        await db.supplier_history.update_one({"supplier_id": "eastbay"}, {"$inc": {"rfqs": 1}})
         await make_quotes(req)
         await db.purchase_requests.update_one({"id": rid}, {"$set": {"stage": "quotes", "round": rnd}})
         await log_activity("Sourcing complete: 2 final quotes, East Bay Hardware excluded (no reply)", "buy", scope="buy")
@@ -1184,6 +1304,12 @@ async def receipt_match(rid: str):
     invoice_amount = req["spend_request"]["amount"]
     amt_ok = abs(invoice_amount - req["spend_request"]["amount"]) < 0.01 and invoice_amount <= q["total"]
     matched = qty_ok and amt_ok
+    if not s.get("matched"):
+        await db.supplier_history.update_one({"supplier_id": req["selected"]}, {"$push": {"orders": {
+            "date": E.iso(today()), "quoted": q.get("first_quote", q["total"]), "final": q["total"],
+            "on_time": not s.get("delayed"), "minutes_late": 30 if s.get("delayed") else 0, "job": "Nguyen Kitchen"}}})
+        await log_activity(f"Scorecard updated: {q['supplier_name']} delivered {'late (+30 min)' if s.get('delayed') else 'on time'}",
+                           "buy", scope="buy")
     await db.shipments.update_one({"request_id": rid}, {"$set": {"matched": {
         "ok": matched, "received": received, "invoice_amount": invoice_amount, "approved_amount": req["spend_request"]["amount"],
         "quote_total": q["total"]}}})

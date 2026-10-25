@@ -4,6 +4,7 @@ import { Inbox, Lock, Bot, User, Check, X, Truck, AlertTriangle, CreditCard, Pac
 import { http, money, fdate, ftime, errMsg, useApp } from "@/lib/api";
 import { Chip, Structured, Loading } from "@/components/Common";
 import DeliveryMap from "@/pages/DeliveryMap";
+import Scorecard from "@/components/Scorecard";
 
 const STEPS = ["Request", "Sourcing", "Quotes", "Pay", "Delivery"];
 const STAGE_IDX = { request: 0, sourcing: 1, quotes: 2, denied: 2, pay: 3, spend: 3, delivery: 4, done: 4 };
@@ -149,7 +150,8 @@ export default function Buy() {
                 <div className="num big-amt">{money(q.total)}</div>
                 <div className="row"><span>Terms</span><b>{q.terms}{q.terms.startsWith("net") ? ` · due ${fdate(q.due_date)}` : ` · ${fdate(q.due_date)}`}</b></div>
                 <div className="row"><span>Delivery</span><b>{q.delivery}</b></div>
-                <div className="row"><span>On-time record</span><b className="num">{q.on_time}%</b></div>
+                <div className="row"><span>On-time record</span><b className="num">{q.on_time}% · {q.orders_on_record} orders</b></div>
+                <div className="row"><span>Reliability adjustment</span><b className="num" data-testid={`reliability-${q.supplier_id}`}>{q.reliability_risk > 0 ? `+${money(q.reliability_risk)} → ${money(q.effective_total)}` : "none"}</b></div>
                 <div className={`impact ${q.impact_bad ? "bad" : "good"}`} data-testid={`impact-${q.supplier_id}`}>Cash impact: {q.cash_impact}</div>
                 {req.stage === "quotes" && (
                   <button className={`btn ${q.recommended ? "btn-primary" : "btn-ghost"}`} disabled={busy || !q.within_mandate} onClick={() => call(`/buy/${rid}/approve-quote`, { supplier_id: q.supplier_id }, `Approved ${q.supplier_name}`)} data-testid={`approve-quote-${q.supplier_id}`}>
@@ -214,6 +216,8 @@ export default function Buy() {
           )}
         </section>
       )}
+
+      <Scorecard />
 
       {/* DELIVERY */}
       {ship && (

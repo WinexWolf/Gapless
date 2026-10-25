@@ -6,6 +6,7 @@ import { http, money, fdate, errMsg, useApp } from "@/lib/api";
 import GapBar from "@/components/GapBar";
 import WeekBars from "@/components/WeekBars";
 import { Loading } from "@/components/Common";
+import PaydayCard from "@/components/PaydayCard";
 
 export default function Dashboard() {
   const { tick } = useApp();
@@ -72,6 +73,8 @@ export default function Dashboard() {
           <span className="tiny muted">{d.explanation_source === "ai" ? "Phrased by AI · numbers from rules" : "Standard explanation"}</span>
         </div>
       </section>
+
+      {st.covered && <PaydayCard />}
 
       <div className="grid2">
         <section className="card" data-testid="cash-calendar">

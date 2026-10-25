@@ -2,15 +2,22 @@ import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { ExternalLink, Bot, User } from "lucide-react";
-import { http, money, ftime, errMsg, useApp } from "@/lib/api";
+import { http, money, fdate, ftime, errMsg, useApp } from "@/lib/api";
 import { Chip, StatusChip, Structured, TYPE_CLASS, Empty, Loading } from "@/components/Common";
 
-const KIND = { offer: "Offer", counter: "Counter", accepted: "Accepted", declined: "Declined", paid: "Paid", guardrail: "Rule check", approved: "Approved", reply: "Reply" };
+const KIND = { reminder: "Reminder", offer: "Offer", counter: "Counter", accepted: "Accepted", declined: "Declined", paid: "Paid", guardrail: "Rule check", approved: "Approved", reply: "Reply" };
 
 export default function Threads() {
   const { tick, bump } = useApp();
   const [d, setD] = useState(null);
-  useEffect(() => { http.get("/threads").then((r) => setD(r.data)).catch((e) => toast.error(errMsg(e))); }, [tick]);
+  const [rem, setRem] = useState([]);
+  useEffect(() => {
+    http.get("/threads").then((r) => setD(r.data)).catch((e) => toast.error(errMsg(e)));
+    http.get("/reminders").then((r) => setRem(r.data.items)).catch(() => {});
+  }, [tick]);
+  const remAct = async (r, path, msg) => {
+    try { await http.post(`/reminders/${r.id}/${path}`); toast.success(msg); bump(); } catch (e) { toast.error(errMsg(e)); }
+  };
 
   const decide = async (t, accept) => {
     try { await http.post(`/actions/${t.action_id}/counter-decision`, { accept }); toast.success(accept ? "Counter approved" : "Counter declined"); bump(); }
@@ -50,6 +57,18 @@ export default function Threads() {
               </li>
             ))}
           </ol>
+          {rem.filter((r) => r.action_id === t.action_id).map((r) => (
+            <div className="reminder" key={r.id} data-testid={`reminder-${t.action_id}`}>
+              <div className="chips"><Chip kind="chip-teal">Scheduled reminder</Chip><Chip kind={r.status === "sent" ? "chip-green" : r.status === "approved" ? "chip-amber" : "chip-line"} testid="reminder-status">{r.status === "draft" ? "Needs your approval" : r.status === "approved" ? `Approved · goes out ${fdate(r.send_on)}` : "Sent (simulated)"}</Chip></div>
+              <div className="small"><b>{money(r.amount)}</b> second payment due {fdate(r.due_date)} · reminder on {fdate(r.send_on)}</div>
+              <div className="draft-subject">{r.subject}</div>
+              <pre className="draft-body small">{r.body}</pre>
+              <div className="btn-row">
+                {r.status === "draft" && <button className="btn btn-primary btn-sm" onClick={() => remAct(r, "approve", "Reminder approved")} data-testid="approve-reminder-btn">Approve reminder</button>}
+                {r.status === "approved" && <button className="btn btn-ghost btn-sm" onClick={() => remAct(r, "send", "Reminder placed in the simulated outbox")} data-testid="send-reminder-btn">Send now (demo)</button>}
+              </div>
+            </div>
+          ))}
           <div className="btn-row">
             {t.status === "countered" && t.pending_counter && (
               <>

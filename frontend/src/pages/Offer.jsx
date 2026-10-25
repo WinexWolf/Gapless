@@ -47,7 +47,11 @@ export default function Offer() {
   const t = S[lang];
 
   const load = useCallback(() => http.get(`/offers/${token}`).then((r) => { setO(r.data); return r.data; }).catch((e) => setErr(errMsg(e))), [token]);
-  useEffect(() => { load().then((d) => d && setLang(d.language || "en")); }, [load]);
+  useEffect(() => {
+    const q = sp.get("lang");
+    load().then((d) => d && setLang(q === "es" || q === "en" ? q : d.language || "en"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [load]);
 
   useEffect(() => {
     const sid = sp.get("session_id");

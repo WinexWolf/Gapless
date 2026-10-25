@@ -26,6 +26,11 @@ function ActionCard({ a, onReview, reload }) {
       reload();
     } catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
   };
+  const setLang = async (language) => {
+    setBusy(true);
+    try { await http.post(`/actions/${a.id}/draft`, { tone: a.draft.tone, language }); toast.success(language === "es" ? "Draft switched to Spanish. Their offer page will open in Spanish." : "Draft switched to English"); reload(); }
+    catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
+  };
   const markPaid = async () => {
     try { await http.post(`/actions/${a.id}/mark-paid`); toast.success("Marked as paid (demo)"); reload(); }
     catch (e) { toast.error(errMsg(e)); }
@@ -57,6 +62,14 @@ function ActionCard({ a, onReview, reload }) {
         <div><span>Friction</span><b className="num">{a.friction}</b></div>
       </div>
       <div className="draft">
+        {!sent && (
+          <div className="cust-lang">
+            <span className="tiny muted">Customer reads</span>
+            <div className="seg sm" role="group" aria-label={`Language for ${a.counterparty}`}>
+              {["en", "es"].map((l) => <button key={l} className={a.draft.language === l ? "on" : ""} disabled={busy} onClick={() => setLang(l)} data-testid={`cust-lang-${l}-${a.id}`}>{l === "en" ? "English" : "Español"}</button>)}
+            </div>
+          </div>
+        )}
         <div className="draft-meta tiny muted">
           {sent ? "Sent message (simulated)" : `Draft · ${a.draft.tone} · ${a.draft.language === "es" ? "Español" : "English"} · ${a.draft.source}`}
         </div>

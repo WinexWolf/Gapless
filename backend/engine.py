@@ -420,3 +420,72 @@ ROUTE = [[37.6470, -122.1260], [37.6880, -122.1560], [37.7280, -122.1940], [37.7
          [37.7790, -122.2290], [37.8080, -122.2500], [37.8440, -122.2520]]
 SHIP_STEPS = ["Packed and loaded", "Left the yard", "On the highway", "Arriving in about 10 minutes", "Delivered"]
 STEP_POINT = [0, 1, 3, 5, 6]
+
+
+# ---------------------------------------------------------------- supplier scorecard
+
+def supplier_history_seed(T):
+    """Synthetic past record per supplier. Prior aggregates + the last 6 orders."""
+    def recs(rows, late_idx=()):
+        out = []
+        for i, (q, f) in enumerate(rows):
+            out.append({"date": iso(T - timedelta(days=7 * (len(rows) - i) + 3)), "quoted": float(q), "final": float(f),
+                        "on_time": i not in late_idx, "minutes_late": 35 if i in late_idx else 0, "job": f"Past job #{i + 1}"})
+        return out
+    return [
+        {"supplier_id": "pacific", "name": "Pacific Lumber", "prior_orders": 19, "prior_on_time": 18,
+         "rfqs": 14, "replies": 14,
+         "orders": recs([(2950, 2860), (4100, 3980), (1800, 1760), (3300, 3190), (2600, 2540), (3720, 3600)])},
+        {"supplier_id": "bayside", "name": "Bayside Building Supply", "prior_orders": 19, "prior_on_time": 17,
+         "rfqs": 12, "replies": 11,
+         "orders": recs([(2750, 2750), (3900, 3860), (1650, 1650), (3100, 3060), (2400, 2400), (3500, 3480)], late_idx=(3,))},
+        {"supplier_id": "eastbay", "name": "East Bay Hardware", "prior_orders": 5, "prior_on_time": 5,
+         "rfqs": 10, "replies": 6,
+         "orders": recs([(900, 900), (1200, 1180), (760, 760), (1450, 1420), (980, 980), (1300, 1300)], late_idx=(1,))},
+    ]
+
+
+RELIABILITY_TARGET = 95
+RELIABILITY_RATE = 0.005  # each on-time point below 95% adds 0.5% to effective cost
+
+
+def scorecard(h):
+    orders = h["prior_orders"] + len(h["orders"])
+    on_time = h["prior_on_time"] + sum(1 for o in h["orders"] if o["on_time"])
+    savings = [(o["quoted"] - o["final"]) / o["quoted"] * 100 for o in h["orders"] if o["quoted"]]
+    pct = round(on_time / orders * 100) if orders else 0
+    return {"supplier_id": h["supplier_id"], "name": h["name"], "orders": orders, "on_time_count": on_time,
+            "on_time_pct": pct, "reply_rate": round(h["replies"] / h["rfqs"] * 100) if h["rfqs"] else 0,
+            "rfqs": h["rfqs"], "replies": h["replies"],
+            "avg_negotiated_pct": round(sum(savings) / len(savings), 1) if savings else 0.0,
+            "recent": h["orders"][-6:][::-1], "late_recent": sum(1 for o in h["orders"][-6:] if not o["on_time"])}
+
+
+def reliability_adjust(total, on_time_pct):
+    pts = max(0, RELIABILITY_TARGET - on_time_pct)
+    risk = r2(total * pts * RELIABILITY_RATE)
+    return risk, r2(total + risk)
+
+
+# ---------------------------------------------------------------- installment reminder
+
+REMINDER_TPL = {
+    "en": ("Friendly heads-up: second payment on {date}",
+           "Hi {cp} team,\n\nThank you again for the first {first} on invoice {num}. Just a friendly heads-up that the second "
+           "payment of {amt} is scheduled for {date}. Nothing to do if it's already planned.\n\n"
+           "Thank you,\n" + SIGN["en"] + "\n\n" + OPTOUT["en"]),
+    "es": ("Aviso amable: segundo pago el {date}",
+           "Hola equipo de {cp}:\n\nGracias de nuevo por el primer pago de {first} de la factura {num}. Les recordamos "
+           "amablemente que el segundo pago de {amt} est\u00e1 programado para el {date}. Si ya est\u00e1 planeado, no tienen que hacer nada.\n\n"
+           "Gracias,\n" + SIGN["es"] + "\n\n" + OPTOUT["es"]),
+}
+REMINDER_DAYS_BEFORE = 3
+
+
+def reminder_draft(action, lang):
+    lang = lang if lang in REMINDER_TPL else "en"
+    t = action["terms"]
+    v = {"cp": action["counterparty"], "num": action["invoice_number"], "first": fmt_money(t["first"]),
+         "amt": fmt_money(t["second"]), "date": fmt_date(t["second_date"], lang)}
+    s, b = REMINDER_TPL[lang]
+    return s.format(**v), b.format(**v)

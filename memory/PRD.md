@@ -7,5 +7,11 @@ Demo app for Maria Alvarez / Bay Remodel Co. (synthetic data, single user, no au
 - Week buckets: Payday = Fri F; Week k ends F+7(k-1)+3 (so the net+10 Pacific move at F+10 lands in Week 2 per spec numbers).
 ## Tests
 - /app/backend/tests/test_gapless.py: 28 passing (run with -n 0).
+## v2 (done)
+- Per-customer language toggle on Plan cards; Spanish drafts get /o/<token>?lang=es links; Outbox shows Español chip + "Open Spanish offer page".
+- Split second-payment reminder (reminders collection), drafted 3 days before due on first payment; Maria approves, then "Send now (demo)" to outbox.
+- Payday summary card on Dashboard when covered (GET /api/summary): items, cost $102.75, Share/Copy.
+- Supplier scorecard (supplier_history collection, GET /api/suppliers/scorecard): on-time %, reply rate, negotiated savings, recent orders; quotes use it + reliability adjustment; each finished order appends history.
+- Tests: 32 passing.
 ## Backlog
 - Optional: email/SMS real sending (out of scope), multi-user auth (out of scope).
