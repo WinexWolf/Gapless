@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Share2, Copy, PartyPopper } from "lucide-react";
+import { PaydayImage } from "@/components/PaydayImage";
+import { MotionButton } from "@/components/MotionButton";
 import { http, money, errMsg, useApp } from "@/lib/api";
 
 export default function PaydayCard() {
@@ -43,8 +45,9 @@ export default function PaydayCard() {
         <li className="tot"><span>Secured</span><span className="num">{money(s.secured)}</span></li>
       </ul>
       <div className="btn-row">
-        <button className="btn btn-light" onClick={share} data-testid="payday-share-btn"><Share2 size={16} /> Share</button>
-        <button className="btn btn-ghost-light" onClick={copy} data-testid="payday-copy-btn"><Copy size={16} /> Copy summary</button>
+        <PaydayImage />
+        <MotionButton className="btn btn-ghost-light" onClick={share} data-testid="payday-share-btn"><Share2 size={16} /> Share text</MotionButton>
+        <MotionButton className="btn btn-ghost-light" onClick={copy} data-testid="payday-copy-btn"><Copy size={16} /> Copy summary</MotionButton>
       </div>
     </section>
   );

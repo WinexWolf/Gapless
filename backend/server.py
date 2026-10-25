@@ -9,7 +9,9 @@ from datetime import date, datetime, timezone, timedelta
 
 import stripe
 from dotenv import load_dotenv
-from fastapi import FastAPI, APIRouter, HTTPException, Body, Request
+from fastapi import FastAPI, APIRouter, HTTPException, Body, Request, Depends, Response, Query
+import billing
+from payday_image import render_summary
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -25,7 +27,11 @@ stripe.api_key = os.environ.get("STRIPE_SECRET_KEY") or "sk_test_emergent"
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 
 app = FastAPI(title="Gapless")
-api = APIRouter(prefix="/api")
+async def premium_guard(request: Request):
+    await billing.gate(db, request)
+
+
+api = APIRouter(prefix="/api", dependencies=[Depends(premium_guard)])
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("gapless")
 
@@ -419,6 +425,18 @@ async def payday_summary():
             "total_cost": total_cost, "cost_pct": pct, "text": "\n".join(lines)}
 
 
+@api.get("/summary/image.png", response_class=Response)
+async def summary_image(theme: str = Query("light", pattern="^(light|dark)$")):
+    summary = await payday_summary()
+    if not summary["covered"]:
+        raise HTTPException(409, "Payroll isn't covered yet. Close the gap before sharing a covered image.")
+    content = await asyncio.to_thread(render_summary, summary, theme, E.BUSINESS_NAME,
+                                      datetime.now(timezone.utc).strftime("%b %d, %Y (UTC)"))
+    return Response(content, media_type="image/png", headers={
+        "Content-Disposition": 'attachment; filename="gapless-payroll-covered.png"',
+        "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+
+
 async def ensure_installment(a):
     t = a["terms"]
     await db.cashflow_events.update_one({"id": f"cf_inst_{a['id']}"}, {"$set": {
@@ -734,6 +752,7 @@ async def stripe_webhook(request: Request):
         event = stripe.Webhook.construct_event(payload, request.headers.get("stripe-signature", ""), STRIPE_WEBHOOK_SECRET)
     except Exception:
         raise HTTPException(400, "Invalid signature")
+    await billing.webhook(db, event)
     if event["type"] == "checkout.session.completed":
         try:
             await settle_session(event["data"]["object"]["id"])
@@ -1480,8 +1499,10 @@ async def buy_next():
     return {"ok": False, "message": "This order is complete. Reset to run it again." if st == "done" else "All quotes were denied."}
 
 
+app.include_router(billing.router(db))
 app.include_router(api)
-app.add_middleware(CORSMiddleware, allow_credentials=True, allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+app.add_middleware(CORSMiddleware, allow_credentials=True,
+                   allow_origins=[o for o in (os.environ.get('CORS_ORIGINS', '') + ',' + os.environ.get('BILLING_ALLOWED_ORIGINS', '')).split(',') if o and o != '*'],
                    allow_methods=["*"], allow_headers=["*"])
 
 

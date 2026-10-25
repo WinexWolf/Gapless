@@ -11,27 +11,30 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import engine as E  # noqa: E402
 
 B = os.environ.get("GAPLESS_API", "http://localhost:8001/api")
+SESSION = requests.Session()
 ORIGIN = "https://example.test"
 
 
 def post(path, json=None, ok=True):
-    r = requests.post(B + path, json=json or {}, timeout=30)
+    r = SESSION.post(B + path, json=json or {}, timeout=30)
     if ok:
         assert r.status_code == 200, (path, r.status_code, r.text)
     return r
 
 
 def get(path, **params):
-    r = requests.get(B + path, params=params, timeout=30)
+    r = SESSION.get(B + path, params=params, timeout=30)
     assert r.status_code == 200, (path, r.text)
     return r.json()
 
 
 @pytest.fixture(autouse=True)
-def fresh():
+def fresh(paid_session):
+    global SESSION
+    SESSION = paid_session
     post("/demo/reset")
     yield
-    requests.put(B + "/settings", json={"llm_force_fail": False, "supplier_has_ai": True}, timeout=10)
+    SESSION.put(B + "/settings", json={"llm_force_fail": False, "supplier_has_ai": True}, timeout=10)
 
 
 # 1 ------------------------------------------------------------------
@@ -73,7 +76,7 @@ def test_approve_creates_outbox_and_link():
     o = get(f"/offers/{r['token']}")
     assert o["counterparty"] == "Lee Bathroom" and o["status"] == "open"
     assert "contact" not in o and "probability" not in str(o)
-    assert requests.get(B + "/offers/not-a-real-token", timeout=10).status_code == 404
+    assert SESSION.get(B + "/offers/not-a-real-token", timeout=10).status_code == 404
 
 
 # 4 ------------------------------------------------------------------
@@ -149,7 +152,7 @@ def test_reset_restores_exactly():
 
 # 9 ------------------------------------------------------------------
 def test_llm_failure_fallbacks():
-    requests.put(B + "/settings", json={"llm_force_fail": True}, timeout=10)
+    SESSION.put(B + "/settings", json={"llm_force_fail": True}, timeout=10)
     d = post("/actions/act_lee/draft", {"regenerate": True, "tone": "firm", "language": "es"}).json()
     assert d["source"].startswith("template") and "STOP" in d["body"]
     assert post("/plan/explain").json()["source"] == "template"
@@ -323,7 +326,7 @@ def test_spanish_supplier_emails_still_sealed():
 
 
 def test_late_credit_within_limit():
-    requests.put(B + "/settings", json={"max_late_credit_pct": 2}, timeout=10)
+    SESSION.put(B + "/settings", json={"max_late_credit_pct": 2}, timeout=10)
     rid = run_sourcing()
     post(f"/buy/{rid}/approve-quote", {"supplier_id": "pacific"})
     post(f"/buy/{rid}/pay-decision", {"choice": "due"})
@@ -337,11 +340,11 @@ def test_late_credit_within_limit():
     pay = [p for p in get("/digest")["supplier_payments"] if "materials" in p["vendor"]][0]
     assert pay["amount"] == 3339.15
     assert get("/forecast")["status"] == payroll_before  # buy side never touches payroll secured/gap
-    assert requests.put(B + "/settings", json={"max_late_credit_pct": 9}, timeout=10).status_code == 400
+    assert SESSION.put(B + "/settings", json={"max_late_credit_pct": 9}, timeout=10).status_code == 400
 
 
 def test_no_credit_when_on_time_or_zero_limit():
-    requests.put(B + "/settings", json={"max_late_credit_pct": 0}, timeout=10)
+    SESSION.put(B + "/settings", json={"max_late_credit_pct": 0}, timeout=10)
     rid = run_sourcing()
     post(f"/buy/{rid}/approve-quote", {"supplier_id": "pacific"})
     post(f"/buy/{rid}/pay-decision", {"choice": "due"})

@@ -1,7 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, RefreshCw, ArrowRight } from "lucide-react";
+import { AlertTriangle, CheckCircle2, RefreshCw, ArrowRight, LockKeyhole, Compass } from "lucide-react";
+import { useBilling } from "@/lib/billing";
+import { MotionButton } from "@/components/MotionButton";
+import { DashboardTour } from "@/components/DashboardTour";
 import { http, money, fdate, errMsg, useApp } from "@/lib/api";
 import GapBar from "@/components/GapBar";
 import WeekBars from "@/components/WeekBars";
@@ -11,14 +14,19 @@ import Confetti from "@/components/Confetti";
 
 export default function Dashboard() {
   const { tick } = useApp();
+  const { status: access, openPaywall } = useBilling();
+  const [tourReplay, setTourReplay] = useState(0);
+  const [fetchAttempt, setFetchAttempt] = useState(0);
+  const [loadError, setLoadError] = useState("");
   const [d, setD] = useState(null);
   const [regen, setRegen] = useState(false);
   const [burstKey, setBurstKey] = useState(0);
   const prevCovered = useRef(null);
 
   useEffect(() => {
-    http.get("/forecast").then((r) => setD(r.data)).catch((e) => toast.error(errMsg(e)));
-  }, [tick]);
+    setLoadError("");
+    http.get("/forecast").then((r) => setD(r.data)).catch((e) => setLoadError(errMsg(e)));
+  }, [tick, fetchAttempt]);
 
   useEffect(() => {
     if (!d) return;
@@ -29,6 +37,7 @@ export default function Dashboard() {
     prevCovered.current = nowCovered;
   }, [d]);
 
+  if (loadError) return <div className="card" role="alert" data-testid="dashboard-load-error"><p>{loadError}</p><MotionButton className="btn btn-primary" onClick={() => setFetchAttempt(x=>x+1)} data-testid="dashboard-retry">Try again</MotionButton></div>;
   if (!d) return <Loading />;
   const { forecast: fc, status: st } = d;
   const upcoming = fc.items.filter((x) => x.date <= fc.friday);
@@ -49,6 +58,14 @@ export default function Dashboard() {
   return (
     <div className="page" data-testid="dashboard-page">
       <Confetti fireKey={burstKey} />
+      <DashboardTour replay={tourReplay} />
+      <div className="dashboard-intro">
+        <div><div className="eyebrow" data-testid="dashboard-demo-label">BAY REMODEL CO. · SYNTHETIC DEMO</div><h1 className="h2" data-testid="dashboard-heading">Your week, in focus.</h1></div>
+        <div className="dashboard-intro-actions">
+          <MotionButton className="icon-btn" onClick={() => setTourReplay(x=>x+1)} aria-label="Replay quick tour" data-testid="dashboard-replay-tour"><Compass size={19} /></MotionButton>
+          <MotionButton className="btn btn-ghost btn-sm" onClick={() => openPaywall()} data-testid="dashboard-access-button">{access?.active ? <CheckCircle2 size={16} /> : <LockKeyhole size={16} />}{access?.active ? "Demo access active" : "Monthly demo access"}</MotionButton>
+        </div>
+      </div>
       {st.covered ? (
         <div className="banner banner-green" data-testid="gap-banner">
           <CheckCircle2 size={22} aria-hidden="true" />
@@ -77,15 +94,15 @@ export default function Dashboard() {
           </div>
           <div className="btn-row" style={{ marginTop: 0 }}>
             <Link to="/digest" className="btn btn-ghost" data-testid="open-digest-btn">Monday digest</Link>
-            <Link to="/plan" className="btn btn-primary" data-testid="open-plan-btn">Open the plan <ArrowRight size={18} /></Link>
+            <MotionButton asChild className="btn btn-primary" data-testid="open-plan-btn"><Link to="/plan">Open the plan <ArrowRight size={18} /></Link></MotionButton>
           </div>
         </div>
         <GapBar gap={st.gap} secured={st.secured} pending={st.pending} covered={st.covered} />
         <div className="expl" data-testid="plan-explanation">
           <p>{d.explanation}</p>
-          <button className="btn btn-ghost btn-sm" onClick={regenerate} disabled={regen} data-testid="regen-explanation">
+          <MotionButton className="btn btn-ghost btn-sm" onClick={regenerate} disabled={regen} data-testid="regen-explanation">
             <RefreshCw size={15} className={regen ? "spin" : ""} /> {regen ? "Writing…" : "Regenerate"}
-          </button>
+          </MotionButton>
           <span className="tiny muted">{d.explanation_source === "ai" ? "Phrased by AI · numbers from rules" : "Standard explanation"}</span>
         </div>
       </section>

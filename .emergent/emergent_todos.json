@@ -1,22 +1,26 @@
 [
   {
-    "content": "Confetti Burst on first flip to Covered",
+    "content": "Implement test subscription billing, server paywall and deterministic PNG endpoint",
     "status": "completed"
   },
   {
-    "content": "Dark Mode Toggle with localStorage persistence",
+    "content": "Build glass paywall, billing status and image-sharing UI",
     "status": "completed"
   },
   {
-    "content": "Landing Testimonial quote card",
+    "content": "Add first-visit tour, theme favicon and full Spanish landing toggle",
     "status": "completed"
   },
   {
-    "content": "Mobile home link in bottom-nav / More page",
+    "content": "Fix paywall Escape and primary-button hover contrast",
     "status": "completed"
   },
   {
-    "content": "Visual verification + testing_agent",
+    "content": "Verify 55 paid backend regressions, actual PNG download and responsive UI",
     "status": "completed"
+  },
+  {
+    "content": "Confirm hosted Stripe card checkout and return in a normal browser; automated submission remains unverified",
+    "status": "pending"
   }
 ]

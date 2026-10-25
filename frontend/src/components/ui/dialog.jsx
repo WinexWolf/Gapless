@@ -12,6 +12,9 @@ const DialogPortal = DialogPrimitive.Portal
 
 const DialogClose = DialogPrimitive.Close
 
+// Unstyled primitive for spring-driven sheets and anchored tour dialogs.
+const DialogSurface = DialogPrimitive.Content
+
 const DialogOverlay = React.forwardRef(({ className, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
@@ -86,6 +89,7 @@ export {
   DialogOverlay,
   DialogTrigger,
   DialogClose,
+  DialogSurface,
   DialogContent,
   DialogHeader,
   DialogFooter,

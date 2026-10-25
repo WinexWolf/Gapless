@@ -1,7 +1,11 @@
 import React, { useCallback, useState } from "react";
 import "@/App.css";
 import { BrowserRouter, Routes, Route, NavLink, Link } from "react-router-dom";
-import { Toaster } from "sonner";
+import { MotionConfig } from "framer-motion";
+import { BillingProvider } from "@/lib/billing";
+import { ThemeSync } from "@/lib/theme";
+import BillingReturn from "@/pages/BillingReturn";
+import { Toaster } from "@/components/ui/sonner";
 import { LayoutDashboard, ListChecks, ShoppingCart, MessagesSquare, Menu } from "lucide-react";
 import { AppCtx } from "@/lib/api";
 import DemoControls from "@/components/DemoControls";
@@ -51,6 +55,7 @@ function Shell() {
       </header>
       <main className="g-main">
         <Routes>
+          <Route path="/billing/return" element={<BillingReturn />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/digest" element={<Digest />} />
           <Route path="/plan" element={<Plan />} />
@@ -81,15 +86,20 @@ export default function App() {
   const [tick, setTick] = useState(0);
   const bump = useCallback(() => setTick((t) => t + 1), []);
   return (
+    <MotionConfig reducedMotion="user">
     <AppCtx.Provider value={{ tick, bump }}>
+      <ThemeSync />
       <BrowserRouter>
+        <BillingProvider>
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/o/:token" element={<Offer />} />
           <Route path="*" element={<Shell />} />
         </Routes>
+        </BillingProvider>
       </BrowserRouter>
-      <Toaster position="top-center" richColors closeButton />
+      <Toaster position="top-center" visibleToasts={3} closeButton />
     </AppCtx.Provider>
+    </MotionConfig>
   );
 }

@@ -2,7 +2,7 @@ import axios from "axios";
 import { createContext, useContext } from "react";
 
 export const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-export const http = axios.create({ baseURL: API, timeout: 20000 });
+export const http = axios.create({ baseURL: API, timeout: 30000, withCredentials: true });
 
 export const money = (x) => {
   if (x === null || x === undefined || Number.isNaN(Number(x))) return "—";

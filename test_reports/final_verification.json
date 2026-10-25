@@ -1,0 +1,25 @@
+{
+  "status": "implemented_with_hosted_checkout_verification_pending",
+  "backend": {
+    "command": "pytest -q -n 0 tests/test_gapless.py tests/test_billing_backend.py",
+    "result": "55 passed in 55.03s",
+    "fixture": "Real Stripe TEST subscriptions using pm_card_visa, bound to hashed browser cookie; subscriptions canceled on teardown",
+    "verified": ["Deterministic legacy flows", "paid and unpaid mutation gating", "cross-browser ownership", "cancel-at-period-end and immediate cancellation", "tampered checkout payload rejection", "invalid webhook signature rejection", "PNG guard, signature and dimensions"],
+    "log": "/app/test_reports/paid-regression.log"
+  },
+  "frontend": {
+    "build": "yarn build passed",
+    "verified": ["Automatic 3-step tour, persistence, replay and keyboard controls", "EN/ES landing and language persistence", "System/saved theme and favicon swap", "Payday image actual browser download named gapless-payroll-covered.png", "Light and dark PNG preview", "Paywall Escape dismissal and inert cleanup", "Reduced motion returns transform:none and animation:none", "Primary-button light hover contrast rgb(255,255,255)"],
+    "viewport_checks": ["1920x800", "390x844"],
+    "overflow": []
+  },
+  "hosted_checkout": {
+    "creation": "Real Stripe TEST Checkout subscription session created; catalog and test tax rendered correctly",
+    "completion": "UNVERIFIED",
+    "observed": "Main agent selected Card and filled actual main-document #cardNumber/#cardExpiry/#cardCvc plus all address fields, unchecked Link, then clicked Subscribe. No invalid form fields. Page did not redirect. Console shows hCaptcha hsw.js EvalError in automated browser.",
+    "corrections_to_prior_reports": ["Claims that card iframes prevented input are disproven by successful main-agent input", "Default Link checkbox was unchecked and did not resolve automation", "No evidence webhook configuration caused hosted form submission failure"],
+    "next": "Complete TEST card checkout in a normal browser and confirm server-verified return. No anti-bot bypass attempted."
+  },
+  "intentional_simulation": "Business data, messages, negotiations and deliveries remain synthetic. Stripe is a real test sandbox; no live charges.",
+  "specification": "/interaction-spec.md"
+}
