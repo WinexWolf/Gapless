@@ -813,3 +813,7 @@ textarea.input { resize: vertical; }
 .invite-result-box { background: var(--teal-l); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
 .invite-link-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .invite-link { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 12.5px; color: var(--ink); font-family: "Source Code Pro", ui-monospace, monospace; }
+
+/* Invoice photo scan */
+.scan-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+.scan-preview { width: 56px; height: 56px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); }

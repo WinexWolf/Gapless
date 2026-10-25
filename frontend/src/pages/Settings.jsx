@@ -62,6 +62,7 @@ export default function Settings() {
         <div className="set-row"><label htmlFor="negoopen"><b>Open this far under the cap</b><div className="tiny muted">The agent's first offer, as a share of your budget cap.</div></label><div className="suffix"><input id="negoopen" className="input num" type="number" step="1" min="0" max="40" value={s.nego_open_pct} onChange={(e) => setNego("nego_open_pct", e.target.value)} data-testid="setting-nego-open" /><span>%</span></div></div>
         <div className="set-row"><label htmlFor="negorounds"><b>Rounds before walking away</b><div className="tiny muted">How many counters before the agent passes on an over-budget supplier.</div></label><div className="suffix"><input id="negorounds" className="input num" type="number" step="1" min="1" max="8" value={s.nego_max_rounds} onChange={(e) => setNego("nego_max_rounds", e.target.value)} data-testid="setting-nego-rounds" /></div></div>
         {s.nego_style === "custom" && <p className="tiny muted" data-testid="nego-custom-note">Using your custom numbers.</p>}
+        <Sw k="supplier_ai_live" label="Live supplier AI" desc="Suppliers with an AI agent (e.g. Pacific Lumber) negotiate back with a real AI, bounded by your budget. Off replays the scripted demo instead." />
       </section>
       <section className="card">
         <h2 className="h3">Late deliveries</h2>

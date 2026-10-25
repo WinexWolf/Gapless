@@ -1,38 +1,30 @@
 [
   {
-    "content": "Backend: Supplier delivery stages",
+    "content": "Backend: llm_vision() for multimodal extraction",
     "status": "completed"
   },
   {
-    "content": "Backend: Negotiation settings",
+    "content": "Backend: storage.py object storage + startup init",
     "status": "completed"
   },
   {
-    "content": "Backend: Invite links",
+    "content": "Backend: invoice scan endpoints",
     "status": "completed"
   },
   {
-    "content": "Backend: Approvals count endpoint",
+    "content": "Backend: real agent-vs-agent supplier_agent_quote + buy_advance wiring + settings toggle",
     "status": "completed"
   },
   {
-    "content": "Frontend: SupplierPortal delivery tracker + owner Buy page delivery badge",
+    "content": "Frontend: More.jsx photo upload + scan-to-fill UI",
     "status": "completed"
   },
   {
-    "content": "Frontend: Settings negotiation card",
+    "content": "Frontend: Settings live-supplier-AI toggle",
     "status": "completed"
   },
   {
-    "content": "Frontend: People invite section + /invite/:token accept page",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: Approvals badge on main nav via polling",
-    "status": "completed"
-  },
-  {
-    "content": "Test: backend smoke + testing agent + screenshots desktop/mobile (badge + 7-item nav verified)",
+    "content": "Test: backend testing_agent 20/20 passed; screenshots verified desktop+mobile",
     "status": "completed"
   }
 ]

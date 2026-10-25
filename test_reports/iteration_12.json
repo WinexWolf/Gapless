@@ -1,0 +1,107 @@
+{
+  "summary": "Completed comprehensive backend testing for Gapless Phase 5 features: invoice photo scanning with AI extraction, fallback mode, real agent-vs-agent negotiation, negotiation toggle, and regression tests. All 20 tests passed successfully with 100% success rate.",
+  "backend_issues": {
+    "critical_bugs": [],
+    "flaky_endpoints": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "passed_tests": [
+    "Invoice scan with unauthenticated request returns 401",
+    "Invoice scan with valid image extracts fields via AI (party, number, amount, due_date)",
+    "Invoice scan returns source='ai', file_id, has_image=true",
+    "Image retrieval by file_id returns stored image",
+    "Unknown file_id returns 404",
+    "Non-image upload returns 400",
+    "Oversized image (>8MB) returns 400",
+    "Invoice scan fallback mode with llm_force_fail=true returns source='fallback'",
+    "Fallback mode still returns 200 with blank/partial fields",
+    "Real agent-vs-agent negotiation: Pacific AI negotiates with structured.ai=true and numeric price",
+    "AI price concession: round-3 price ($3405) <= round-1 price ($3450)",
+    "AI prices stay within deterministic band: floor=$3390, ceiling=$3520",
+    "Pacific final quote reflects negotiated price and within_mandate=true",
+    "Negotiation toggle OFF: supplier_ai_live=false produces scripted messages (no AI)",
+    "Negotiation toggle OFF: flow still completes to quotes stage",
+    "Regression: /forecast endpoint working",
+    "Regression: /plan endpoint working",
+    "Regression: /settings endpoint working",
+    "Regression: /activity endpoint working",
+    "Regression: /outbox endpoint working",
+    "Regression: /threads endpoint working"
+  ],
+  "test_report_links": [
+    "/app/backend_test.py",
+    "/tmp/backend_test_output.log"
+  ],
+  "action_item_for_main_agent": "",
+  "updated_files": [
+    "/app/backend_test.py"
+  ],
+  "success_percentage": {
+    "backend": "100%",
+    "frontend": "N/A (backend-only testing)"
+  },
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_test_itself": false,
+  "test_details": {
+    "invoice_scan_feature": {
+      "status": "PASSED",
+      "tests": [
+        "Valid invoice image upload with AI extraction",
+        "Image retrieval by file_id",
+        "Unknown file_id returns 404",
+        "Non-image upload validation (400)",
+        "Oversized image validation (400)",
+        "Unauthenticated request validation (401)"
+      ],
+      "notes": "AI vision successfully extracted all fields (kind, party, number, amount, due_date) from generated invoice image. Amount returned as number, due_date as YYYY-MM-DD format. Image storage and retrieval working correctly."
+    },
+    "invoice_scan_fallback": {
+      "status": "PASSED",
+      "tests": [
+        "Fallback mode with llm_force_fail=true",
+        "Returns source='fallback' with blank/partial fields",
+        "Still returns 200 status"
+      ],
+      "notes": "Fallback mode working as expected. When LLM fails, system gracefully returns fallback with empty fields, allowing owner to manually enter data."
+    },
+    "agent_negotiation": {
+      "status": "PASSED",
+      "tests": [
+        "Real AI negotiation with supplier_ai_live=true",
+        "Pacific thread contains structured.ai=true messages",
+        "AI prices are numeric and within deterministic band",
+        "AI price concedes across rounds (3450 -> 3405)",
+        "Final quote within mandate"
+      ],
+      "notes": "Real agent-vs-agent negotiation working perfectly. Pacific AI negotiated from $3450 to $3405 (concession verified). All prices stayed within deterministic Python-enforced band [$3390, $3520]. Final quote marked within_mandate=true."
+    },
+    "negotiation_toggle": {
+      "status": "PASSED",
+      "tests": [
+        "supplier_ai_live=false produces scripted messages",
+        "No AI messages in Pacific thread when toggle OFF",
+        "Flow still completes to quotes stage"
+      ],
+      "notes": "Negotiation toggle working correctly. When supplier_ai_live=false, Pacific messages are scripted (no structured.ai=true). Flow still completes successfully."
+    },
+    "regression": {
+      "status": "PASSED",
+      "tests": [
+        "All core endpoints (/forecast, /plan, /settings, /activity, /outbox, /threads) working"
+      ],
+      "notes": "All existing endpoints continue to work correctly. No regressions detected."
+    }
+  },
+  "deterministic_guardrails": {
+    "status": "VERIFIED",
+    "notes": "Price band enforcement verified: All AI-generated prices stayed within Python-enforced floor ($3390) and ceiling ($3520). Concession logic working: final price ($3405) <= initial price ($3450)."
+  },
+  "auth_testing": {
+    "method": "Clerk +clerk_test user with owner_admin role",
+    "notes": "Created ephemeral Clerk user, minted JWT token, inserted user_profiles document with role='owner_admin'. All authenticated endpoints working correctly. Cleanup performed after tests."
+  }
+}

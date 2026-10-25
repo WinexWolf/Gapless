@@ -1,6 +1,7 @@
 import os
 import re
 import uuid
+import base64
 import secrets
 import asyncio
 import logging
@@ -9,14 +10,15 @@ from datetime import date, datetime, timezone, timedelta
 
 import stripe
 from dotenv import load_dotenv
-from fastapi import FastAPI, APIRouter, HTTPException, Body, Request, Depends, Response, Query
+from fastapi import FastAPI, APIRouter, HTTPException, Body, Request, Depends, Response, Query, UploadFile, File
 import billing
 from payday_image import render_summary
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 
 import engine as E
-from llm import llm_text, extract_json
+import storage
+from llm import llm_text, llm_vision, extract_json
 import email_util
 try:
     from backend.clerk_auth import clerk_router, require_user
@@ -1112,6 +1114,8 @@ async def write_settings(payload: dict = Body(...)):
         upd["require_approval"] = bool(payload["require_approval"])
     if payload.get("nego_style") in ("gentle", "balanced", "aggressive", "custom"):
         upd["nego_style"] = payload["nego_style"]
+    if "supplier_ai_live" in payload:
+        upd["supplier_ai_live"] = bool(payload["supplier_ai_live"])
     if "nego_open_pct" in payload:
         v = float(payload["nego_open_pct"])
         if not 0 <= v <= 40:
@@ -1206,6 +1210,67 @@ async def add_invoice(payload: dict = Body(...)):
                                          "contact": ""})
     await log_activity(f"Invoice added: {party} {num} {E.fmt_money(amount)} due {E.fmt_date(due)}", "invoice")
     return {"ok": True}
+
+
+@api.post("/invoices/scan")
+async def scan_invoice(request: Request, file: UploadFile = File(...)):
+    """Upload a photo of an invoice/receipt. A vision model extracts the fields;
+    the owner reviews and confirms before anything hits the forecast (money stays deterministic)."""
+    settings = await get_settings()
+    ext = (file.filename or "").rsplit(".", 1)[-1].lower() if "." in (file.filename or "") else ""
+    ctype = file.content_type or storage.MIME_TYPES.get(ext, "application/octet-stream")
+    data = await file.read()
+    if len(data) > 8 * 1024 * 1024:
+        raise HTTPException(400, "That image is too large (max 8 MB).")
+    if not ctype.startswith("image/"):
+        raise HTTPException(400, "Please upload a photo (JPG, PNG or WEBP).")
+    b64 = base64.b64encode(data).decode()
+    prompt = ("Read this invoice or receipt. Return JSON only: {\"kind\":\"receivable|payable\","
+              "\"party\":str,\"number\":str,\"amount\":number,\"due_date\":\"YYYY-MM-DD\"}. "
+              "kind is 'payable' if the business owes the vendor, 'receivable' if a customer owes the business. "
+              "amount is the grand total. If a field is unreadable use empty string or null. Today is " + E.iso(today()))
+    out = await llm_vision("You extract structured fields from invoice/receipt images. Never invent amounts.",
+                           prompt, b64, settings.get("llm_force_fail"))
+    j = extract_json(out) or {}
+    fields = {"kind": j.get("kind") if j.get("kind") in ("receivable", "payable") else "payable",
+              "party": str(j.get("party") or "")[:60], "number": str(j.get("number") or "")[:24],
+              "amount": None, "due_date": ""}
+    try:
+        if j.get("amount") not in (None, ""):
+            fields["amount"] = E.r2(float(j["amount"]))
+    except Exception:
+        pass
+    try:
+        if j.get("due_date"):
+            fields["due_date"] = E.iso(E.d(j["due_date"]))
+    except Exception:
+        pass
+    source = "ai" if (out and fields["amount"]) else "fallback"
+    fid = uid("scan")
+    stored_path = None
+    try:
+        path = f"{storage.APP_NAME}/invoices/{fid}.{ext or 'jpg'}"
+        res = await asyncio.to_thread(storage.put_object, path, data, ctype)
+        stored_path = res["path"]
+    except Exception as e:
+        log.warning("invoice image store failed: %s", e)
+    await db.invoice_scans.insert_one({"id": fid, "storage_path": stored_path, "content_type": ctype,
+                                       "original_filename": file.filename, "fields": fields, "source": source,
+                                       "is_deleted": False, "created_at": now_iso()})
+    await log_activity("Invoice photo scanned" + (" · read by AI" if source == "ai" else " · needs manual review"), "invoice")
+    return {"fields": fields, "source": source, "file_id": fid, "has_image": bool(stored_path)}
+
+
+@api.get("/invoices/scan/{fid}/image")
+async def scan_invoice_image(fid: str, request: Request):
+    rec = await db.invoice_scans.find_one({"id": fid, "is_deleted": False}, NO_ID)
+    if not rec or not rec.get("storage_path"):
+        raise HTTPException(404, "Image not found")
+    try:
+        data, ctype = await asyncio.to_thread(storage.get_object, rec["storage_path"])
+    except Exception:
+        raise HTTPException(404, "Image not available")
+    return Response(content=data, media_type=rec.get("content_type") or ctype)
 
 
 # ------------------------------------------------------------------ BUY: materials agent
@@ -1380,8 +1445,13 @@ async def make_quotes(req):
     qs = [("pacific", pac_lines, "net+10", E.iso(thu + timedelta(days=10)), "7:00 AM"),
           ("bayside", bay_lines, "due on delivery", E.iso(thu), "7:00 AM")]
     out = []
+    pac_override = (req.get("agent_nego") or {}).get("final")
     for sid, lines, terms, due, time in qs:
         s = next(x for x in E.SUPPLIERS if x["id"] == sid)
+        if sid == "pacific" and pac_override:
+            diff = E.r2(float(pac_override) - E.lines_total(lines))
+            if abs(diff) >= 0.01:
+                lines = lines + [{"name": "Negotiated adjustment (agent)", "qty": 1, "unit": "", "unit_price": diff, "total": diff}]
         total = E.lines_total(lines)
         before_fri = E.d(due) <= F
         sc = hist.get(sid) or {}
@@ -1402,6 +1472,44 @@ async def make_quotes(req):
         await db.quotes.insert_one(dict(q))
 
 
+async def supplier_agent_quote(req, rnd, our_counter=None):
+    """Real AI on Pacific Lumber's (agent_agent lane) side. The LLM proposes a price + message,
+    but Python CLAMPS it to a deterministic [floor, ceiling] band so money never leaves bounds.
+    Falls back to scripted figures if the LLM is unavailable or disabled."""
+    items, m = req["items"], req["mandate"]
+    ceiling = E.lines_total(E.price_lines(items, E.PRICES[("pacific", "quote")]))   # opening list price
+    floor = E.lines_total(E.price_lines(items, E.PRICES[("pacific", "final")]))     # true cost floor
+    settings = await get_settings()
+    scripted = floor + 10.0 if rnd >= 2 else ceiling
+    price, message, used = None, None, "script"
+    if settings.get("supplier_ai_live", True):
+        sys = ("You are a sales rep for Pacific Lumber negotiating a building-materials order with a "
+               "contractor's buying assistant. Be warm, concise and professional. You want the best "
+               "price for yourself but will concede to win the deal.")
+        prompt = (f"Negotiation round {rnd}. Your list price is {ceiling:.2f}. Your absolute floor is "
+                  f"{floor:.2f} (NEVER go below it). The buyer wants net+10 terms, delivery by "
+                  f"{m['latest_delivery']}. "
+                  + (f"The buyer just countered at {our_counter:.2f}. Respond with your best counter. "
+                     if our_counter else "Give your opening quote. ")
+                  + "Concede a little toward your floor each round. Respond with JSON only: "
+                    "{\"price\": number, \"terms\": \"net+10\", \"message\": \"1-2 sentences to the buyer\"}.")
+        out = await llm_text(sys, prompt, settings.get("llm_force_fail"), timeout=8.0)
+        j = extract_json(out) or {}
+        try:
+            if j.get("price") not in (None, ""):
+                price = float(j["price"])
+        except Exception:
+            price = None
+        if j.get("message"):
+            message = str(j["message"]).strip()[:240]
+        if price is not None:
+            used = "ai"
+    if price is None:
+        price = scripted
+    price = E.r2(min(ceiling, max(floor, price)))   # deterministic guardrail clamp
+    return {"price": price, "terms": "net+10", "message": message, "floor": floor, "ceiling": ceiling, "source": used}
+
+
 @api.post("/buy/{rid}/advance")
 async def buy_advance(rid: str):
     req = await get_req(rid)
@@ -1410,9 +1518,12 @@ async def buy_advance(rid: str):
     m = req["mandate"]
     items = req["items"]
     if rnd == 1:
-        pl = E.price_lines(items, E.PRICES[("pacific", "quote")])
-        await rfq_msg(rid, "pacific", "Pacific Lumber agent", "them", f"Quote: {E.fmt_money(E.lines_total(pl))}, net+10, delivery {m['latest_delivery']}.",
-                      {"type": "quote", "lines": pl, "price": E.lines_total(pl), "terms": "net+10", "deadline": m["latest_delivery"]})
+        ag = await supplier_agent_quote(req, 1)
+        author = "Pacific Lumber agent" + (" (live AI)" if ag["source"] == "ai" else "")
+        text = ag["message"] or f"Quote: {E.fmt_money(ag['price'])}, net+10, delivery {m['latest_delivery']}."
+        await rfq_msg(rid, "pacific", author, "them", text,
+                      {"type": "quote", "price": ag["price"], "terms": "net+10", "deadline": m["latest_delivery"], "ai": ag["source"] == "ai"})
+        await db.purchase_requests.update_one({"id": rid}, {"$set": {"agent_nego.opening": ag["price"], "agent_nego.source": ag["source"]}})
         bl = E.price_lines(items, E.PRICES[("bayside", "quote")])
         await rfq_msg(rid, "bayside", "Dana at Bayside Building Supply", "them",
                       E.buy_text("bay_quote", slang(req, "bayside"), total=E.fmt_money(E.lines_total(bl))))
@@ -1427,14 +1538,19 @@ async def buy_advance(rid: str):
             await rfq_msg(rid, "pacific", "Rule check (code)", "code", f"Countering at your limit instead: {E.fmt_money(counter)}.", internal=True)
         await rfq_msg(rid, "pacific", "Maria's assistant", "us", f"Counter: {E.fmt_money(counter)}, keep net+10.",
                       {"type": "counter", "price": counter, "terms": "net+10", "deadline": m["latest_delivery"]})
+        await db.purchase_requests.update_one({"id": rid}, {"$set": {"agent_nego.our_counter": counter}})
         await rfq_msg(rid, "bayside", "Rule check (code)", "code",
                       f"Thursday 11:00 AM misses the {m['deliver_by_time']} deadline; asking for 7:00 AM and net+10.", internal=True)
         await rfq_msg(rid, "bayside", "Maria's assistant", "us", E.buy_text("ask", slang(req, "bayside")))
         await db.rfq_threads.update_many({"request_id": rid, "supplier_id": {"$in": ["pacific", "bayside"]}}, {"$set": {"status": "negotiating"}})
     else:
-        fl = E.price_lines(items, E.PRICES[("pacific", "final")])
-        await rfq_msg(rid, "pacific", "Pacific Lumber agent", "them", f"Final: {E.fmt_money(E.lines_total(fl))}, net+10, delivery {m['latest_delivery']}.",
-                      {"type": "final", "lines": fl, "price": E.lines_total(fl), "terms": "net+10", "deadline": m["latest_delivery"]})
+        our_counter = (req.get("agent_nego") or {}).get("our_counter")
+        ag = await supplier_agent_quote(req, rnd, our_counter)
+        author = "Pacific Lumber agent" + (" (live AI)" if ag["source"] == "ai" else "")
+        text = ag["message"] or f"Final: {E.fmt_money(ag['price'])}, net+10, delivery {m['latest_delivery']}."
+        await rfq_msg(rid, "pacific", author, "them", text,
+                      {"type": "final", "price": ag["price"], "terms": "net+10", "deadline": m["latest_delivery"], "ai": ag["source"] == "ai"})
+        await db.purchase_requests.update_one({"id": rid}, {"$set": {"agent_nego.final": ag["price"]}})
         await rfq_msg(rid, "bayside", "Dana at Bayside Building Supply", "them",
                       E.buy_text("bay_final", slang(req, "bayside"),
                                  total=E.fmt_money(E.lines_total(E.price_lines(items, E.PRICES[('bayside', 'quote')])) + 60)))
@@ -1443,6 +1559,7 @@ async def buy_advance(rid: str):
         await db.rfq_threads.update_one({"request_id": rid, "supplier_id": "eastbay"}, {"$set": {"status": "excluded"}})
         await db.supplier_history.update_many({"supplier_id": {"$in": ["pacific", "bayside"]}}, {"$inc": {"rfqs": 1, "replies": 1}})
         await db.supplier_history.update_one({"supplier_id": "eastbay"}, {"$inc": {"rfqs": 1}})
+        req = await get_req(rid)  # refresh so make_quotes sees the AI-negotiated final price
         await make_quotes(req)
         await db.purchase_requests.update_one({"id": rid}, {"$set": {"stage": "quotes", "round": rnd}})
         await log_activity("Sourcing complete: 2 final quotes, East Bay Hardware excluded (no reply)", "buy", scope="buy")
@@ -2094,6 +2211,15 @@ app.include_router(api)
 app.add_middleware(CORSMiddleware, allow_credentials=True,
                    allow_origins=[o for o in (os.environ.get('CORS_ORIGINS', '') + ',' + os.environ.get('BILLING_ALLOWED_ORIGINS', '')).split(',') if o and o != '*'],
                    allow_methods=["*"], allow_headers=["*"])
+
+
+@app.on_event("startup")
+async def _init_storage():
+    try:
+        await asyncio.to_thread(storage.init_storage)
+        logging.getLogger("gapless").info("Object storage initialized")
+    except Exception as e:
+        logging.getLogger("gapless").warning("Object storage init failed (uploads will error until fixed): %s", e)
 
 
 @app.on_event("shutdown")

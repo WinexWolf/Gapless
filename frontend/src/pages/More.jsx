@@ -1,7 +1,7 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { Settings as Cog, Activity as Act, Send, ChevronRight, FilePlus2, CalendarDays, Home, Sparkles, Users, Inbox } from "lucide-react";
+import { Settings as Cog, Activity as Act, Send, ChevronRight, FilePlus2, CalendarDays, Home, Sparkles, Users, Inbox, Camera, Loader2 } from "lucide-react";
 import { http, errMsg, useApp } from "@/lib/api";
 
 const EMPTY = { kind: "receivable", party: "", number: "", amount: "", due_date: "" };
@@ -11,7 +11,10 @@ export default function More() {
   const [text, setText] = useState("");
   const [f, setF] = useState(EMPTY);
   const [busy, setBusy] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const [src, setSrc] = useState("");
+  const [preview, setPreview] = useState("");
+  const fileRef = useRef(null);
 
   const parse = async () => {
     setBusy(true);
@@ -22,9 +25,24 @@ export default function More() {
       toast(r.data.source === "ai" ? "Fields filled from the text. Check them before adding." : "Filled what we could. Please check the fields.");
     } catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
   };
+  const scan = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { toast.error("Please choose a photo (JPG, PNG or WEBP)."); return; }
+    setPreview(URL.createObjectURL(file));
+    setScanning(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await http.post("/invoices/scan", fd, { headers: { "Content-Type": "multipart/form-data" }, timeout: 60000 });
+      setF({ ...EMPTY, ...Object.fromEntries(Object.entries(r.data.fields).map(([k, v]) => [k, v ?? ""])) });
+      setSrc(r.data.source);
+      toast(r.data.source === "ai" ? "Read from your photo. Please double-check the fields." : "Couldn't read it clearly — please fill the fields in.");
+    } catch (err) { toast.error(errMsg(err)); } finally { setScanning(false); if (fileRef.current) fileRef.current.value = ""; }
+  };
   const add = async () => {
     setBusy(true);
-    try { await http.post("/invoices", { ...f, amount: Number(f.amount) }); toast.success("Invoice added to the forecast"); setF(EMPTY); setText(""); setSrc(""); bump(); }
+    try { await http.post("/invoices", { ...f, amount: Number(f.amount) }); toast.success("Invoice added to the forecast"); setF(EMPTY); setText(""); setSrc(""); setPreview(""); bump(); }
     catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
   };
   const links = [["/", "Back to home", Home], ["/approvals", "Approvals", Inbox], ["/walkthrough", "Guided walkthrough", Sparkles], ["/people", "People", Users], ["/digest", "Monday digest", CalendarDays], ["/activity", "Activity log", Act], ["/outbox", "Outbox", Send], ["/settings", "Settings", Cog]];
@@ -39,10 +57,19 @@ export default function More() {
       </section>
       <section className="card" data-testid="add-invoice">
         <h2 className="h3"><FilePlus2 size={18} /> Add invoice</h2>
-        <p className="tiny muted">Paste invoice text to fill the form, or type the fields yourself. Adding an invoice changes the forecast.</p>
+        <p className="tiny muted">Snap a photo of an invoice or receipt and AI fills the form, paste the text, or type it yourself. Adding an invoice changes the forecast.</p>
+
+        <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={scan} style={{ display: "none" }} data-testid="invoice-photo-input" />
+        <div className="scan-row">
+          <button className="btn btn-primary btn-sm" disabled={scanning || busy} onClick={() => fileRef.current?.click()} data-testid="invoice-scan-btn">
+            {scanning ? <Loader2 className="spin" size={16} /> : <Camera size={16} />} {scanning ? "Reading photo…" : "Scan a photo"}
+          </button>
+          {preview && <img src={preview} alt="Invoice preview" className="scan-preview" data-testid="invoice-scan-preview" />}
+        </div>
+
         <textarea className="input" rows={4} placeholder="e.g. Invoice INV-2001 from Garcia Patio, $1,850 due 2026-11-12" value={text} onChange={(e) => setText(e.target.value)} data-testid="invoice-text" />
         <button className="btn btn-ghost btn-sm" disabled={!text.trim() || busy} onClick={parse} data-testid="invoice-parse-btn">Fill from text</button>
-        {src && <span className="tiny muted"> Parsed by {src === "ai" ? "AI" : "simple rules (fallback)"}</span>}
+        {src && <span className="tiny muted" data-testid="invoice-source"> Read by {src === "ai" ? "AI" : "simple rules (please check)"}</span>}
         <div className="form-grid">
           <label>Type<select className="input" value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })} data-testid="invoice-kind"><option value="receivable">Customer owes me</option><option value="payable">I owe a vendor</option></select></label>
           <label>Customer / vendor<input className="input" value={f.party} onChange={(e) => setF({ ...f, party: e.target.value })} data-testid="invoice-party" /></label>
