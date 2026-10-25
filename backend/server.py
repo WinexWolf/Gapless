@@ -17,6 +17,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 import engine as E
 from llm import llm_text, extract_json
+import email_util
 try:
     from backend.clerk_auth import clerk_router, require_user
     from backend import auth_roles
@@ -298,6 +299,29 @@ async def add_msg(thread_id, actor, side, kind, text, structured=None):
                                   "side": side, "kind": kind, "text": text, "structured": structured})
 
 
+async def email_counterparty(name, subject, greeting, lines, cta_label, origin):
+    """Best-effort: email a claimed client/supplier that something needs them."""
+    if not email_util.enabled():
+        return
+    prof = await db.user_profiles.find_one({"linked_name": name}, NO_ID)
+    to = (prof or {}).get("email")
+    if not to:
+        return
+    url = f"{origin}/sign-in" if origin else None
+    await email_util.send_email(to=to, subject=subject,
+                                html=email_util.notify_html(greeting, lines, cta_label, url))
+
+
+async def email_owner(subject, greeting, lines):
+    """Best-effort: alert the business owner(s) that a counterparty replied."""
+    if not email_util.enabled():
+        return
+    admins = [e.strip() for e in os.environ.get("ADMIN_EMAIL", "").split(",") if e.strip()]
+    for to in admins[:2]:
+        await email_util.send_email(to=to, subject=subject,
+                                    html=email_util.notify_html(greeting, lines, None, None))
+
+
 async def approve_one(aid, payload):
     a = await get_action(aid)
     if a["status"] != "proposed":
@@ -329,6 +353,11 @@ async def approve_one(aid, payload):
     await db.actions.update_one({"id": aid}, {"$set": {"status": "approved", "offer_token": token,
                                                        "approved_at": now_iso(), "sent": {"subject": subject, "body": body}}})
     await log_activity(f"Approved & sent (simulated) {E.TYPE_LABEL[a['type']]} to {a['counterparty']}", "approve")
+    await email_counterparty(a["counterparty"], f"{E.BUSINESS_NAME}: a request is waiting for you",
+                             f"Hi {a['counterparty']},",
+                             [f"{E.BUSINESS_NAME} sent you a {E.TYPE_LABEL[a['type']].lower()} about invoice {a['invoice_number']}.",
+                              "Sign in to your portal to review and respond."],
+                             "Open your portal", (payload.get("origin_url") or "").rstrip("/"))
     return {"ok": True, "token": token, "link": link, "checks": checks}
 
 
@@ -647,6 +676,8 @@ async def offer_accept(token: str):
         raise HTTPException(400, f"Offer is {offer['status']}")
     a = await get_action(offer["action_id"])
     await accept_action(a, "Accepted on the offer page.")
+    await email_owner(f"{a['counterparty']} accepted your offer",
+                      "Good news —", [f"{a['counterparty']} accepted the {E.TYPE_LABEL[a['type']].lower()} offer for invoice {a['invoice_number']}."])
     return await offer_public(token)
 
 
@@ -662,6 +693,8 @@ async def offer_decline(token: str):
     await db.actions.update_one({"id": a["id"]}, {"$set": {"status": "declined"}})
     await add_msg(a["id"], a["counterparty"], "them", "declined", "Declined on the offer page.")
     await log_activity(f"{a['counterparty']} declined the {E.TYPE_LABEL[a['type']].lower()} offer", "declined")
+    await email_owner(f"{a['counterparty']} declined your offer",
+                      "Heads up —", [f"{a['counterparty']} declined the {E.TYPE_LABEL[a['type']].lower()} offer for invoice {a['invoice_number']}."])
     return await offer_public(token)
 
 
@@ -707,6 +740,8 @@ async def offer_counter(token: str, payload: dict = Body(...)):
     await db.offers.update_one({"token": token}, {"$set": {"status": "countered", "pending_counter": pc}})
     await db.actions.update_one({"id": a["id"]}, {"$set": {"status": "countered"}})
     await log_activity(f"{a['counterparty']} countered; waiting for Maria", "counter")
+    await email_owner(f"{a['counterparty']} sent a counter-offer",
+                      "Action needed —", [f"{a['counterparty']} countered on invoice {a['invoice_number']}. Review it in your Threads to approve or hold."])
     return {**(await offer_public(token)), "guardrail": {"blocked": False}}
 
 
@@ -968,7 +1003,8 @@ async def write_settings(payload: dict = Body(...)):
     for k in ("supplier_has_ai", "llm_force_fail", "auto_late_credit"):
         if k in payload:
             upd[k] = bool(payload[k])
-    upd["require_approval"] = True  # always, enforced in code
+    if "require_approval" in payload:
+        upd["require_approval"] = bool(payload["require_approval"])
     await db.settings.update_one({"id": "settings"}, {"$set": upd})
     if "tone" in upd or "language" in upd:
         s2 = {**s, **upd}
@@ -1664,17 +1700,104 @@ async def portal_client_summary(request: Request):
     m = await _me(request)
     name = m.get("linked_name")
     invoices = await db.receivables.find({"customer": name}, NO_ID).to_list(100)
+    actions = await db.actions.find({"counterparty": name}, NO_ID).to_list(100)
+    offers = []
+    for a in actions:
+        off = await db.offers.find_one({"action_id": a["id"]}, NO_ID)
+        if off:
+            try:
+                offers.append(await offer_public(off["token"]))
+            except HTTPException:
+                pass
     threads = await db.threads.find({"counterparty": name}, NO_ID).to_list(100)
-    return {"name": name, "role": "client", "invoices": invoices, "threads": threads}
+    return {"name": name, "role": "client", "invoices": invoices, "offers": offers, "threads": threads}
 
 
 @api.get("/portal/supplier/summary")
 async def portal_supplier_summary(request: Request):
     m = await _me(request)
     sid, name = m.get("linked_id"), m.get("linked_name")
+    req = await get_req()
     rfqs = await db.rfq_threads.find({"supplier_id": sid}, NO_ID).to_list(100)
     quotes = await db.quotes.find({"supplier_id": sid}, NO_ID).to_list(100)
-    return {"name": name, "role": "supplier", "rfqs": rfqs, "quotes": quotes}
+    request_info = None
+    if req:
+        request_info = {"id": req["id"], "items": req.get("items", []),
+                        "mandate": req.get("mandate", {}), "stage": req.get("stage")}
+    return {"name": name, "supplier_id": sid, "role": "supplier",
+            "request": request_info, "rfqs": rfqs, "quotes": quotes}
+
+
+@api.post("/portal/supplier/quote")
+async def portal_supplier_quote(request: Request, payload: dict = Body(default={})):
+    """A real supplier submits a price. The buying agent reacts deterministically:
+    over budget -> counter at the cap; within budget -> shortlist it automatically when
+    autonomy allows, otherwise hold it for Maria's approval. No LLM touches the money."""
+    m = await _me(request)
+    sid, name = m.get("linked_id"), m.get("linked_name")
+    req = await get_req()
+    if not req:
+        raise HTTPException(400, "There is no active materials request to quote on yet.")
+    rid = req["id"]
+    try:
+        price = round(float(payload.get("price")), 2)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Enter a valid price")
+    if price <= 0:
+        raise HTTPException(400, "Price must be greater than zero")
+    terms = (str(payload.get("terms") or "net+10"))[:40]
+    delivery = str(payload.get("delivery_date") or req.get("mandate", {}).get("latest_delivery", ""))[:40]
+    note = (str(payload.get("note") or ""))[:300]
+    cap = float(req.get("mandate", {}).get("max_total", 0) or 0)
+
+    # make sure a thread exists even if the owner hasn't started sourcing yet
+    await db.rfq_threads.update_one(
+        {"request_id": rid, "supplier_id": sid},
+        {"$setOnInsert": {"id": uid("rfq"), "request_id": rid, "supplier_id": sid, "supplier_name": name,
+                          "lane": "agent_human", "status": "rfq_sent", "messages": [], "internal": []}},
+        upsert=True)
+
+    hist = next((E.scorecard(h) for h in await all_docs("supplier_history") if h["supplier_id"] == sid), {})
+    on_time = hist.get("on_time_pct") or next((s["on_time"] for s in E.SUPPLIERS if s["id"] == sid), 90)
+    risk, eff = E.reliability_adjust(price, on_time)
+    within = (cap <= 0) or (price <= cap)
+
+    q = {"id": uid("q"), "request_id": rid, "supplier_id": sid, "supplier_name": name, "lane": "agent_human",
+         "lines": [], "total": price, "terms": terms, "due_date": delivery, "delivery": delivery,
+         "on_time": on_time, "orders_on_record": hist.get("orders", 0), "late_recent": hist.get("late_recent", 0),
+         "reliability_risk": risk, "effective_total": eff, "within_mandate": within, "recommended": False,
+         "source": "supplier_portal"}
+    await db.quotes.update_one({"request_id": rid, "supplier_id": sid}, {"$set": q}, upsert=True)
+    await rfq_msg(rid, sid, name, "them",
+                  f"Quote: {E.fmt_money(price)}, {terms}, delivery {delivery}.{(' ' + note) if note else ''}",
+                  {"type": "quote", "price": price, "terms": terms})
+
+    settings = await get_settings()
+    auto = not settings.get("require_approval", True)
+    if not within:
+        await rfq_msg(rid, sid, "Rule check (code)", "code",
+                      f"{E.fmt_money(price)} is above the {E.fmt_money(cap)} budget cap.", internal=True)
+        await rfq_msg(rid, sid, "Maria's assistant", "us",
+                      f"Thanks {name}. That's above our {E.fmt_money(cap)} budget — can you do {E.fmt_money(cap)}, keep {terms}?",
+                      {"type": "counter", "price": cap, "terms": terms})
+        await db.rfq_threads.update_one({"request_id": rid, "supplier_id": sid}, {"$set": {"status": "negotiating"}})
+        reaction = {"status": "countered", "message": f"That's above budget — the buying agent countered at {E.fmt_money(cap)}."}
+    elif auto:
+        await rfq_msg(rid, sid, "Rule check (code)", "code",
+                      f"{E.fmt_money(price)} is within the {E.fmt_money(cap)} budget. Effective cost {E.fmt_money(eff)}.", internal=True)
+        await rfq_msg(rid, sid, "Maria's assistant", "us",
+                      f"Thanks {name} — {E.fmt_money(price)} works and is on the shortlist. We'll confirm the final pick shortly.")
+        await db.rfq_threads.update_one({"request_id": rid, "supplier_id": sid}, {"$set": {"status": "final"}})
+        reaction = {"status": "shortlisted", "message": "Within budget — the buying agent put it on the shortlist."}
+    else:
+        await rfq_msg(rid, sid, "Maria's assistant", "us",
+                      f"Thanks {name} — {E.fmt_money(price)} received. Sending it to Maria for approval.")
+        await db.rfq_threads.update_one({"request_id": rid, "supplier_id": sid}, {"$set": {"status": "quoted"}})
+        reaction = {"status": "pending_owner", "message": "Received — waiting for Maria's approval."}
+    await log_activity(f"{name} submitted a quote of {E.fmt_money(price)}", "buy", scope="buy")
+    await email_owner(f"{name} submitted a quote",
+                      "New supplier quote —", [f"{name} quoted {E.fmt_money(price)} ({terms}). {reaction['message']}"])
+    return {"ok": True, "reaction": reaction}
 
 
 app.include_router(clerk_router)

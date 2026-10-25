@@ -784,3 +784,17 @@ textarea.input { resize: vertical; }
 .portal-thread { padding: 12px 14px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); margin-top: 8px; }
 .portal-msg { margin-top: 6px; }
 .portal-msg div { font-size: 14px; color: var(--ink); }
+
+.portal-offer { padding: 14px; border-radius: 14px; background: var(--bg); border: 1px solid var(--line); margin-top: 10px; }
+.portal-offer-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.portal-offer-terms { margin-top: 6px; }
+.portal-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.portal-counter { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.portal-quote-form { display: flex; flex-direction: column; gap: 10px; margin-top: var(--space-3); }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field span { font-size: 12px; font-weight: 600; color: var(--ink2); }
+.field input { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font: inherit; }
+.field input:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; border-color: var(--teal); }
+
+.people-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.people-right { display: inline-flex; align-items: center; gap: 10px; }

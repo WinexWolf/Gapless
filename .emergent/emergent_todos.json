@@ -1,42 +1,30 @@
 [
   {
-    "content": "Phase 4: Add backend/clerk_auth.py (Clerk config + relay + require_user) and wire into server.py",
+    "content": "Study existing offer accept/counter/decline + buy supplier quote logic to reuse for portal replies",
     "status": "completed"
   },
   {
-    "content": "Phase 4: Append ADMIN_EMAIL to backend .env; provision Clerk (google sign-in, app_name Gapless)",
+    "content": "Owner People View: /api/auth/people frontend page (who signed in + linkage) under More",
     "status": "completed"
   },
   {
-    "content": "Phase 4: Roles model (owner/client/supplier) + current_member dependency + /api/me + counterparty linking (claim) endpoints",
+    "content": "Autonomy toggle: surface require_approval as 'agents act within guardrails vs draft & wait' in Settings + wire semantics",
     "status": "completed"
   },
   {
-    "content": "Phase 4: Seed existing cast as claimable counterparty login records",
+    "content": "Client portal replies: accept / counter / commit pay date wired to deterministic offer logic; agent reacts live",
     "status": "completed"
   },
   {
-    "content": "Phase 4: Frontend Clerk provider + /sign-in route + header UserButton + role-based routing + claim screen + portals",
+    "content": "Supplier portal replies: submit quote / counter wired to buy engine; buying agent reacts within guardrails or drafts",
     "status": "completed"
   },
   {
-    "content": "Phase 4: Test auth (401/403/role gating/isolation) + keep regression suite green under auth",
+    "content": "Phase 6: Real email alerts via Emergent-managed Resend (offer/RFQ sent + reply received) with portal deep links",
     "status": "completed"
   },
   {
-    "content": "Phase 5: Portal reply actions (client accept/counter/commit; supplier submit/counter quote) wired to deterministic engine",
-    "status": "pending"
-  },
-  {
-    "content": "Phase 5: Agent reactions to real replies + autonomy toggle (act-within-guardrails vs draft-and-approve)",
-    "status": "pending"
-  },
-  {
-    "content": "Phase 6: Real outbound email notifications (Emergent-managed Resend) with portal deep links",
-    "status": "pending"
-  },
-  {
-    "content": "Phase 7: Inbound email webhook (two-way) + DNS/domain setup checklist for the user",
-    "status": "pending"
+    "content": "Test portals + agent reactions + email end-to-end (Clerk tokens) and keep regression green",
+    "status": "completed"
   }
 ]

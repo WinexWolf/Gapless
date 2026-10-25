@@ -101,10 +101,12 @@ def _clerk(path, method="GET", body=None):
 
 def _find_owner():
     try:
-        users = _clerk(f"/users?email_address={_OWNER_EMAIL}")
-        return users[0]["id"] if users else None
+        for u in _clerk("/users?limit=100"):
+            if any(e.get("email_address") == _OWNER_EMAIL for e in u.get("email_addresses", [])):
+                return u["id"]
     except Exception:
-        return None
+        pass
+    return None
 
 
 def _mint_owner_token():

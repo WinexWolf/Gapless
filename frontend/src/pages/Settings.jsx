@@ -39,7 +39,12 @@ export default function Settings() {
         <p className="tiny muted">Enforced in code. Any counter above these is declined automatically and the thread shows why.</p>
         <div className="set-row"><label htmlFor="maxep"><b>Max early-pay discount</b></label><div className="suffix"><input id="maxep" className="input num" type="number" step="0.25" min="0" max="10" value={s.max_early_pay_pct} onChange={(e) => setS({ ...s, max_early_pay_pct: e.target.value })} data-testid="setting-max-early" /><span>%</span></div></div>
         <div className="set-row"><label htmlFor="maxfee"><b>Max extension fee</b></label><div className="suffix"><input id="maxfee" className="input num" type="number" step="0.25" min="0" max="10" value={s.max_ext_fee_pct} onChange={(e) => setS({ ...s, max_ext_fee_pct: e.target.value })} data-testid="setting-max-fee" /><span>%</span></div></div>
-        <div className="set-row"><div><b>Always require my approval</b><div className="tiny muted">Nothing is sent, accepted or paid without Maria.</div></div><span className="chip chip-green"><Lock size={12} /> Always on</span></div>
+        <div className="set-row"><div><b>When a reply comes in</b><div className="tiny muted">Within the limits above, agents can act on their own or hold everything for you.</div></div>
+          <div className="seg" role="group" aria-label="Agent autonomy">
+            <button className={!s.require_approval ? "on" : ""} onClick={() => setS({ ...s, require_approval: false })} data-testid="setting-autonomy-auto">Act within guardrails</button>
+            <button className={s.require_approval ? "on" : ""} onClick={() => setS({ ...s, require_approval: true })} data-testid="setting-autonomy-approve">Draft &amp; wait for me</button>
+          </div>
+        </div>
       </section>
       <section className="card">
         <h2 className="h3">Late deliveries</h2>
