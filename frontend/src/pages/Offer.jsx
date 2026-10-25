@@ -165,7 +165,7 @@ export default function Offer() {
         )}
         <p className="tiny muted optout" data-testid="offer-optout">{t.optout}</p>
       </section>
-      <footer className="footer" data-testid="footer">Demo: synthetic data</footer>
+      <footer className="footer" data-testid="footer">Gapless</footer>
     </div>
   );
 }

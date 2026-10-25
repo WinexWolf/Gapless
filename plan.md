@@ -1,302 +1,129 @@
-# Gapless — Updated Implementation Plan (FINAL HANDOFF: Feature Complete → Stripe Hosted Checkout Manual Verification Pending)
+# Gapless — Admin Unlock + End-to-End Guided Walkthrough + Demo/Real Mode (Updated)
 
-## 0) Decision Log (explicit user decisions)
-- **Stripe paywall**: **Monthly demo access** via **Stripe TEST subscription** checkout.
-- **Demo constraints remain**: synthetic data only, single demo user, **no auth**, no live charges, no deployment requested.
-- **Hard rule reaffirmed**: deterministic engine in Python for all math/forecasts/rankings/money decisions; LLM only for text generation/parsing/explanations.
-- **Pricing**: **$19 USD / month** as an **editable SAMPLE** price.
-- **Tax mode**: default to **Stripe-managed** ("full") when eligible; fall back to **calc-only** when ineligible.
+## 1) Objectives
+- ✅ **Always-unlocked owner/admin mode** so the team never gets blocked by Stripe during demos.
+  - Implemented via `PAYWALL_ENABLED=false`.
+  - `/api/billing/status` returns `active=true, status="unlocked"`.
+  - Mutations work without subscription/cookies.
+- ✅ **Guided auto-play walkthrough** that runs **both** agent flows end-to-end:
+  - Payroll-gap agent (cover Friday payroll) → Buying agent (source → pay → deliver → receipt match).
+  - Delivered as a first-class UI at `/walkthrough`.
+- ✅ **Demo vs Real mode switch** (Demo = autoplay/simulated replies; Real = manual/no auto-replies).
+  - Stored in backend settings and exposed in UI.
+- ✅ **Hide/soften “simulated/demo/synthetic” wording during the demo** while keeping all computations deterministic.
+  - UI and key copy updated across app.
+- ✅ Preserve core rule: **all money/date/math stays deterministic in Python**; LLM is only for text.
 
----
+## 2) Implementation Steps
 
-## 1) Current State & Progress
+### Phase 1 — Core POC (isolation → fix until works)
+**Goal:** Prove an end-to-end “autoplay” controller can reliably advance both flows via deterministic backend plumbing.
 
-### 1.1 What exists and is working (baseline)
-- End-to-end full-stack prototype (React + FastAPI + MongoDB) implementing:
-  - Distinct **Landing** page
-  - **Dashboard**, **Cash Digest**, **Plan** flow
-  - **Buy** flow (LLM parsing for requests) + **Delivery Map**
-  - **Threads** with interactive messages
-  - Public **Offer** page + Stripe test checkout for **one-time invoice payments**
-- Deterministic backend engine (`engine.py`) handling all numerical logic.
-- Theme system uses `data-theme` + CSS variables.
+User stories:
+1. ✅ As an owner, I can press one button to run the next scripted step and see a clear status update.
+2. ✅ As an owner, I can run payroll steps until payroll is covered.
+3. ✅ As an owner, I can run buy steps until delivery is done.
+4. ✅ As an owner, I can reset the system back to the beginning of the walkthrough.
+5. ✅ As an owner, I can stop autoplay at any time and resume later.
 
-### 1.2 Completed items from the prior session (verified)
-- High-contrast “Covered ✓” pill readability fix (`GapBar.jsx`, `App.css`).
-- Standalone Landing page with hero gradient, live-demo badge, CTA (`Landing.jsx`).
-- Global UI polish including shadows and button hover states (`App.css`).
-- Dark Mode toggle with persistence.
-- Confetti burst animation on first transition to “Covered”.
-- Landing testimonial quote card.
-- Mobile home link (bottom nav/More) to Landing.
+Implementation:
+- Backend (FastAPI)
+  - ✅ Implemented `POST /api/demo/walkthrough/next` to execute one deterministic step across both agents.
+    - Payroll sequencing includes “approve plan” (server-side `approve_all`) when actions are proposed.
+    - Then uses existing deterministic simulators (`simulate_payroll`, `buy_next`).
+  - ✅ Implemented `GET /api/demo/walkthrough/status` with compact progress state:
+    - Payroll: `covered`, `resolved/selected`, `secured`, `gap`, `friday_label`
+    - Buy: `stage`
+  - Note: reset continues to use the existing `POST /api/demo/reset`.
+- Frontend (React)
+  - ✅ Implemented `/walkthrough` page with:
+    - Play / Pause / Step once / Restart controls
+    - Phase trail, progress bar, narration timeline
+    - Done banner + CTAs (Dashboard / Threads / Buy / Payday image)
+- Web research
+  - Completed implicitly via implementation best practices (cancel-safe loop, hook order compliance).
+- Testing (POC)
+  - ✅ Verified via curl loop: walkthrough completes in ~18 steps to `done=true`.
+  - ✅ Verified in UI with screenshots and autoplay.
 
-### 1.3 NEW work implemented in this iteration (feature complete)
-- **Payday Share Image (downloadable PNG)**
-  - Backend: deterministic PNG generator (`/api/summary/image.png?theme=light|dark`) using Pillow (`payday_image.py`).
-  - Frontend: “Payday image” button + preview dialog + **download** (`PaydayImage.jsx`).
-  - Verified: **1080×1350**, correct filename **`gapless-payroll-covered.png`**, and **actual browser download** succeeds.
-- **Theme-aware favicon**
-  - Added `favicon-light.svg` and `favicon-dark.svg`.
-  - Implemented live swapping via `ThemeSync` (`lib/theme.js`) updating `<link id="gapless-favicon">`.
-  - Verified: dark mode shows brighter favicon.
-- **First-time Dashboard Tour (3 steps)**
-  - Spotlight overlay + tooltip with localStorage persistence (`DashboardTour.jsx`).
-  - Dashboard “replay tour” control.
-  - Accessibility: background inert while open; focus restored on close; **Escape close fixed**.
-- **Spanish Landing Page**
-  - Full EN/ES landing copy in `landingCopy.js`.
-  - Language toggle on landing header with localStorage persistence (`gapless-lang`).
-  - Verified: `documentElement.lang` updates (e.g., `es`).
-- **Stripe Monthly Demo Access paywall**
-  - Backend `billing.py`:
-    - Cookie-bound browser identity (HttpOnly cookie `gapless_demo_access`), status endpoint, hosted Checkout subscription session creation, cancel-at-period-end.
-    - Server-side gating of paywalled mutation routes (FastAPI dependency) → 402.
-    - Webhook dispatch extended to sync subscription state.
-  - Frontend:
-    - `BillingProvider` + global 402 interceptor opens paywall (`PaywallSheet`).
-    - Glass + spring sheets (`PaywallSheet.jsx`, `GlassDialog.jsx`, Motion tokens), return page (`BillingReturn.jsx`).
-- **Glassmorphic UI + Apple-inspired motion pass**
-  - Added glass material tokens + `.g-glass` + chrome translucency in `App.css`.
-  - Introduced spring-driven components (`MotionButton`, `GlassDialog`) and `MotionConfig reducedMotion="user"`.
-  - Verified: reduced-motion results in computed `transform: none` and `animation: none` for the sheet.
-  - Fixed **light theme primary button hover** color contrast; verified computed color `rgb(255, 255, 255)`.
+### Phase 2 — V1 App Development (integrate into product UI)
+**Goal:** Turn the POC into a polished guided demo experience matching the existing teal glassmorphic system.
 
-### 1.4 Testing status (authoritative)
-- **Backend regression (paid gating + deterministic rules)**
-  - ✅ **PASS**: `pytest -q -n 0 tests/test_gapless.py tests/test_billing_backend.py` → **55 passed** in **55.03s**.
-  - Log: `/app/test_reports/paid-regression.log`.
-  - Note: parallel xdist is **not valid** for these tests due to shared synthetic DB resets; **serial is authoritative**.
-  - Test harness uses **real Stripe TEST subscriptions** via `pm_card_visa`, bound to the hashed cookie owner in Mongo, and cancels fixture subscriptions at teardown.
-- **Frontend/UI verification**
-  - ✅ PNG preview + **actual download**, dark/light theme, 1920×800 and 390×844 viewports.
-  - ✅ No horizontal overflow observed.
-  - ✅ Spanish landing copy and language toggle.
-  - ✅ Theme-aware favicon swapping.
-  - ✅ Tour behavior and paywall Escape key.
-- **Stripe hosted checkout completion (manual verification pending)**
-  - ⚠️ **UNVERIFIED**: completing hosted Checkout with card and returning to `/billing/return`.
-  - Automation:
-    - Confirmed card fields are accessible after selecting **Card** (not iframe-blocked).
-    - Observed **hCaptcha / Stripe anti-bot JS eval errors** in automated runs; after Subscribe, no redirect occurred.
-  - No bypass attempted. This remains a **manual sign-off** item.
+User stories:
+1. ✅ As an owner, I can toggle **Demo vs Real** mode globally and immediately see the UI adapt.
+2. ✅ As an owner, in Demo mode I can run a guided end-to-end “Show me how it works” walkthrough.
+3. ✅ As an owner, in Real mode I can operate the app manually (no autoplay) using existing screens.
+4. ✅ As an owner, I don’t see “simulated/demo/synthetic” labels during a demo.
+5. ✅ As an owner, I can share the “Payroll covered” image after the walkthrough completes.
 
----
+Implementation:
+- Mode system
+  - ✅ Backend: added `mode: demo|real` to settings (`engine.DEFAULT_SETTINGS`, `/api/settings` write).
+  - ✅ Frontend: added `ModeProvider` + header `ModePill` and a Settings “Mode” section.
+  - ✅ Real mode behavior:
+    - Blocks walkthrough endpoint with HTTP 400.
+    - Makes `POST /api/demo/simulate-next` inert (returns `ok=false` + message).
+    - Hides the floating `DemoControls` in Real mode.
+- Guided walkthrough UI
+  - ✅ Implemented `/walkthrough` as the primary guided demo surface.
+  - ✅ Dashboard CTA added: “See it work” → `/walkthrough`.
+  - ✅ Progress and narration UI added (glass-friendly, mobile-first).
+- Hide/soften simulated wording
+  - ✅ Footer changed to neutral “Gapless”.
+  - ✅ Dashboard eyebrow softened (removed “SYNTHETIC DEMO”).
+  - ✅ Outbox relabeled to “Outbox” + removed “Simulated” chip.
+  - ✅ Plan / Threads / Buy strings removed “(demo)” / “(simulated)” suffixes.
+  - ✅ Offer footer softened.
+  - ✅ Landing copy softened (“synthetic data” removed, “simulated” phrasing revised).
+  - ✅ Payday summary footer softened (“Gapless”).
+- Always-unlocked admin mode (for now)
+  - ✅ Backend: `billing.gate()` no-ops when `PAYWALL_ENABLED=false`.
+  - ✅ Backend: `/api/billing/status` returns an unlocked active status when paywall disabled.
+  - ✅ Frontend paywall UI is effectively non-blocking.
+- Styling
+  - ✅ Added walkthrough CSS to `App.css` aligned with existing tokens and dark theme handling.
 
-## 2) Updated Objectives (new requests)
+Conclude Phase 2:
+- ✅ Completed 1 round of end-to-end testing agent run + manual UI verification.
 
-### 2.1 Feature requests (this iteration)
-1. Payday Share Image (PNG export)
-2. Theme-aware favicon
-3. First-time 3-step Dashboard tour
-4. Spanish Landing (EN/ES toggle)
-5. Stripe monthly demo access subscription paywall
-6. Glassmorphic + Apple-inspired spring motion polish
+### Phase 3 — Stabilization + Test Coverage
+User stories:
+1. ✅ As an owner, walkthrough never gets stuck; errors show a clear recovery action.
+2. ✅ As an owner, resetting always returns the walkthrough to the exact start.
+3. ✅ As an owner, switching Demo/Real never corrupts data.
+4. ✅ As an owner, paywall does not block in always-unlocked mode.
+5. ✅ As an owner, existing flows (Plan/Buy/Threads/Offers) still work normally.
 
-### 2.2 Objective status
-- ✅ Implemented: (1)–(6)
-- ⚠️ Remaining: **Hosted Stripe Checkout completion + success return manual verification** in a normal browser session (non-automated).
+Implementation:
+- Backend tests
+  - ✅ Added `tests/test_walkthrough.py`:
+    - verifies unlocked billing status
+    - verifies mutation without billing cookie
+    - verifies walkthrough end-to-end completion (payroll covered + buy done)
+    - verifies Real mode blocks walkthrough and makes simulate-next inert
+  - ✅ Updated paywall-gating tests to be skipped when `PAYWALL_ENABLED=false`.
+    - Current test status: **54 passed / 7 skipped** (skips are intentional paywall tests).
+- Frontend smoke validation
+  - ✅ Testing agent: backend 100%, frontend 95%.
+  - ✅ One blocked item was *not a bug* (tour overlay interfered with one automated click path).
+  - ✅ Testing agent applied a correct React Hooks ordering fix in `DemoControls.jsx`.
+- Audit
+  - ✅ Major “simulated/demo/synthetic” strings softened as requested.
 
-### 2.3 Non-goals / constraints (unchanged)
-- No production deployment.
-- No real customer data.
-- No LLM-based numeric decision-making.
-- No gesture-heavy new paradigms.
+## 3) Next Actions
+1. (Optional) Decide when to re-enable paywall enforcement for non-owner demos by setting `PAYWALL_ENABLED=true`.
+   - If re-enabled, the previously skipped billing tests automatically resume.
+2. (Optional polish) Add a “Guided Walkthrough” CTA to Landing (in addition to Dashboard/More).
+3. (Optional polish) If desired, add a subtle “no real emails/charges” disclaimer in Real mode only, so demo mode stays clean.
+4. (Optional) Add lightweight frontend automated tests for `/walkthrough` (Play/Restart) that avoid the Dashboard tour overlay.
 
----
-
-## 3) Discovery & Inputs Needed
-
-### 3.1 Codebase exploration
-- ✅ Completed.
-
-### 3.2 Reference exploration
-- ✅ Completed; design/motion deliverables created and updated:
-  - `/app/design_guidelines.md`
-  - `/app/interaction_spec.md` (**human-readable A–F spec**) and served as `/interaction-spec.md`.
-
-### 3.3 Inputs still needed
-- **User verification required**:
-  - Manually complete a Stripe hosted **TEST** subscription checkout (Card) in a normal browser and confirm:
-    - redirect to `/billing/return` occurs
-    - `/api/billing/status` becomes `active: true`
-    - gated actions succeed
-
----
-
-## 4) Implementation Plan (phased)
-
-### Phase A — Stripe TEST subscription paywall (Monthly demo access)
-**Goal**: subscription checkout unlocks premium demo access **without auth**, enforced server-side.
-
-#### A.1 Define paywall scope (locked vs free)
-- ✅ Implemented
-  - **Free reads**: Landing, dashboard reads, public offers, `/api/summary`, `/api/summary/image.png`.
-  - **Paywalled mutations**: actions approvals, demo simulation, buy mutations, plan explanation, settings/invoices/reminders as implemented.
-
-#### A.2 Backend: Stripe subscription integration
-- ✅ Implemented in `billing.py`
-  - Idempotent catalog provisioning via `lookup_key`.
-  - Endpoints:
-    - `GET /api/billing/status`
-    - `POST /api/billing/checkout`
-    - `POST /api/billing/cancel`
-  - Cookie-bound identity via HttpOnly cookie (`gapless_demo_access`).
-  - Mongo collections: `billing_access`, `billing_transactions`.
-
-#### A.3 Backend: gating dependency
-- ✅ Implemented
-  - FastAPI dependency checks entitlement via Stripe refresh and returns 402 for locked mutations.
-
-#### A.4 Frontend: paywall UX (glass + springs)
-- ✅ Implemented
-  - Global 402 interceptor opens `PaywallSheet`.
-  - `BillingReturn` page polls status.
-  - Mobile/desktop sheet behaviors via Framer Motion springs.
-
-#### A.5 Testing
-- ✅ Backend: 55/55 passing serial regression tests with real Stripe TEST subscription fixtures.
-- ⚠️ Hosted UI completion: **manual verification pending**.
-
-#### A.6 Risk mitigation / next step
-- Automation can be blocked by Stripe anti-bot mechanisms; do **not** bypass.
-- Next steps:
-  1. **Manual test** (required for final sign-off): complete hosted checkout using test card `4242 4242 4242 4242`.
-  2. If manual succeeds: document as verified; accept automation limitations.
-  3. Optional: if the team wants to reduce Link interruptions for human users, consider Stripe Checkout `wallet_options` config changes (not required for correctness). Only do this if requested.
-
-Deliverable status: paywall is implemented and backend-verified; **hosted completion awaits manual sign-off**.
-
----
-
-### Phase B — Payday Share Image (downloadable PNG)
-**Goal**: deterministic downloadable image of “Payroll covered” summary.
-
-- ✅ Backend implemented: `GET /api/summary/image.png?theme=light|dark`
-  - 1080×1350 PNG, DEMO labels, theme-aware palette.
-  - Returns 409 if not covered.
-- ✅ Frontend implemented:
-  - `PaydayImage` dialog: preview + download + optional native share when supported.
-- ✅ Verified: correct dimensions and **actual browser download** success.
-
----
-
-### Phase C — Theme-aware favicon
-**Goal**: swap favicon when theme changes.
-
-- ✅ Added assets: `frontend/public/favicon-light.svg`, `favicon-dark.svg`.
-- ✅ Implemented switching via `ThemeSync` in `lib/theme.js`.
-- ✅ Verified: theme change updates favicon and theme-color.
-
----
-
-### Phase D — First-time 3-step Dashboard tour
-**Goal**: accessible guided overlay on first dashboard visit.
-
-- ✅ Implemented with persistence + replay.
-- ✅ Verified in mobile + desktop.
-- ✅ Escape-to-close and inert cleanup verified.
-
----
-
-### Phase E — Spanish Landing page toggle
-**Goal**: Spanish-speaking owners can view the pitch in Spanish.
-
-- ✅ Implemented full bilingual landing copy + segmented toggle.
-- ✅ Persisted in `localStorage` as `gapless-lang`.
-- ✅ Verified: Spanish copy renders; `documentElement.lang` updates.
-
----
-
-### Phase F — Glassmorphic UI + Apple-inspired spring interactions
-**Goal**: apply glass materials + spring motion per binding docs.
-
-- ✅ Materials tokens and glass surfaces added to `App.css`.
-- ✅ Spring motion via Framer Motion (no keyframes for sheet/tour movement).
-- ✅ Reduced motion honored (`MotionConfig reducedMotion="user"` + CSS fallback).
-- ✅ Verified: no overflow; improved hover contrast for light primary CTA.
-- Spec: `/app/interaction_spec.md` and `/app/frontend/public/interaction-spec.md`.
-
----
-
-## 5) Data Model / State Updates
-- ✅ Billing collections persist across demo reset:
-  - `billing_access` (browser id, subscription state)
-  - `billing_transactions` (checkout session tracking)
-- ✅ Local flags:
-  - `gapless-tour-seen`
-  - `gapless-lang`
-- No deterministic engine changes required.
-
----
-
-## 6) API & Routing Additions
-- ✅ Billing
-  - `GET /api/billing/status`
-  - `POST /api/billing/checkout`
-  - `POST /api/billing/cancel`
-  - existing `POST /api/stripe/webhook` now syncs subscription state
-- ✅ Share image
-  - `GET /api/summary/image.png?theme=light|dark`
-- ✅ Frontend routes
-  - `/billing/return`
-- ✅ Spec served
-  - `/interaction-spec.md`
-
----
-
-## 7) UI/UX Acceptance Criteria
-- **Paywall**
-  - ✅ Backend rejects gated mutations with 402 when locked.
-  - ✅ Paid access/cancel-at-period-end verified in backend tests.
-  - ⚠️ Hosted Checkout completion + return to app: **manual verification pending**.
-- **Share PNG**
-  - ✅ Download produces 1080×1350 image with DEMO label; readable in both themes; correct filename.
-- **Favicon**
-  - ✅ Favicon switches immediately on theme toggle and persists.
-- **Tour**
-  - ✅ Runs once; skip/back/next; replay; accessible; reduced motion compatible.
-- **Spanish landing**
-  - ✅ Full landing copy toggles EN/ES and persists.
-- **Glass/motion**
-  - ✅ Glass applied selectively; spring motion interruptible; reduced motion honored; hover contrast fixed.
-
----
-
-## 8) Risk & Mitigation
-- **Stripe hosted Checkout automation limitations**:
-  - Automated browsers may trigger anti-bot (hCaptcha) and block completion.
-  - **Mitigation**: manual sandbox verification; keep backend Stripe fixture tests for regression.
-- **No-auth entitlement security**:
-  - ✅ Cookie-bound HttpOnly identity; server-side Stripe refresh prevents spoofing.
-- **PNG font stability**:
-  - ✅ Bundled font fallback + system fallback.
-- **Parallel backend tests**:
-  - xdist introduces shared-state flakiness; keep critical suite serial.
-
----
-
-## 9) Execution Order (final)
-1. ✅ Implement glass tokens/classes + MotionConfig scaffolding.
-2. ✅ Implement Stripe subscription paywall backend + frontend sheet/return + server gating.
-3. ✅ Implement Dashboard tour.
-4. ✅ Implement deterministic PNG share image.
-5. ✅ Implement theme-aware favicon.
-6. ✅ Implement Spanish landing toggle + translations.
-7. ✅ Fix accessibility issue: Escape closes paywall.
-8. ✅ Fix light primary hover contrast.
-9. ✅ Run mandatory backend tests (serial) and record pass log.
-10. ✅ Confirm actual PNG download, reduced motion, and responsive overflow.
-11. **Remaining**: Manual Stripe hosted checkout verification (Card) + document result.
-
----
-
-## 10) Deliverables
-- ✅ Stripe TEST subscription paywall (“Monthly demo access”) with server-enforced gating and cookie-bound entitlements.
-- ✅ Downloadable “Payroll covered” PNG (1080×1350) generated deterministically in Python.
-- ✅ Theme-aware favicon swap on dark mode.
-- ✅ First-time 3-step Dashboard tour with spotlight overlay and accessibility.
-- ✅ EN/ES Landing toggle with full translated pitch.
-- ✅ Glassmorphic material system + Apple-inspired spring/interruptible motion improvements.
-- ✅ Backend regression pass log: `/app/test_reports/paid-regression.log` (55 passed).
-- ✅ Authoritative summary: `/app/test_reports/final_verification.json`.
-- ⚠️ **Manual verification pending**: hosted Stripe Checkout completion + redirect to `/billing/return` in a normal browser (automation shows Stripe anti-bot JS issues; no bypass attempted).
+## 4) Success Criteria
+- ✅ Owners can use the app indefinitely without Stripe paywall blocking (always-unlocked mode).
+- ✅ One guided walkthrough completes from fresh reset to:
+  - ✅ Payroll covered state reached (Payday share image available)
+  - ✅ Buy flow reaches done (delivery + receipt match)
+- ✅ Demo vs Real switch persists and changes behavior:
+  - Demo enables walkthrough/autoplay
+  - Real disables walkthrough and auto-replies
+- ✅ Demo experience does not show “simulated/demo/synthetic” wording in primary UI surfaces.
+- ✅ All calculations remain deterministic in Python; no regression in core workflows/tests.

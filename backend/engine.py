@@ -94,7 +94,7 @@ def seed_docs(T):
 DEFAULT_SETTINGS = {"id": "settings", "max_early_pay_pct": 2.0, "max_ext_fee_pct": 1.0,
                     "require_approval": True, "tone": "friendly", "language": "en",
                     "supplier_has_ai": True, "llm_force_fail": False,
-                    "max_late_credit_pct": 2.0, "auto_late_credit": True}
+                    "max_late_credit_pct": 2.0, "auto_late_credit": True, "mode": "demo"}
 
 
 # ---------------------------------------------------------------- forecast

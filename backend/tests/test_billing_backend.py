@@ -17,6 +17,12 @@ B = os.environ.get("GAPLESS_API", "http://localhost:8001/api")
 ORIGIN = "https://bay-remodel-cash.preview.emergentagent.com"
 WRONG_ORIGIN = "https://evil.com"
 
+# Owner / admin "always unlocked" mode disables the Stripe paywall. The paywall-gating
+# assertions below only make sense when the paywall is explicitly enabled, so skip them
+# otherwise (the code path is preserved and re-enabled by setting PAYWALL_ENABLED=true).
+PAYWALL_ON = os.environ.get("PAYWALL_ENABLED", "false").lower() == "true"
+requires_paywall = pytest.mark.skipif(not PAYWALL_ON, reason="paywall disabled (always-unlocked owner mode)")
+
 
 def test_stripe_key_is_test_mode():
     """Verify we're using test Stripe keys."""
@@ -24,6 +30,7 @@ def test_stripe_key_is_test_mode():
     assert key.startswith("sk_test_"), "Must use Stripe test key, not live"
 
 
+@requires_paywall
 def test_unpaid_browser_gets_cookie_and_locked_status():
     """Test that unpaid browser gets HTTPOnly cookie and locked status."""
     session = requests.Session()
@@ -47,6 +54,7 @@ def test_unpaid_browser_gets_cookie_and_locked_status():
     print(f"✓ Unpaid browser: cookie set, status locked")
 
 
+@requires_paywall
 def test_paid_subscription_shows_active(paid_session, stripe_test_subscription):
     """Test that browser with paid subscription shows active status."""
     r = paid_session.get(f"{B}/billing/status", timeout=10)
@@ -59,6 +67,7 @@ def test_paid_subscription_shows_active(paid_session, stripe_test_subscription):
     print(f"✓ Paid subscription: active=True, status=active, period_end={data['period_end']}")
 
 
+@requires_paywall
 def test_protected_actions_blocked_without_billing(unpaid_session):
     """Test that protected actions return 402 without billing."""
     # Reset demo first
@@ -120,6 +129,7 @@ def test_cancel_subscription_sets_cancel_at_period_end(paid_session, stripe_test
     print(f"✓ Cancel subscription: cancel_at_period_end=True, still active")
 
 
+@requires_paywall
 def test_cancel_immediately_via_sdk_makes_inactive(paid_session, stripe_test_subscription):
     """Test that canceling subscription immediately via SDK makes it inactive."""
     import stripe
@@ -141,6 +151,7 @@ def test_cancel_immediately_via_sdk_makes_inactive(paid_session, stripe_test_sub
     print(f"✓ Immediate cancel via SDK: active=False, status=canceled")
 
 
+@requires_paywall
 def test_protected_actions_return_402_after_cancel(paid_session, stripe_test_subscription):
     """Test that protected actions return 402 after subscription canceled."""
     import stripe
@@ -160,6 +171,7 @@ def test_protected_actions_return_402_after_cancel(paid_session, stripe_test_sub
     print(f"✓ Protected action after cancel: 402 Payment Required")
 
 
+@requires_paywall
 def test_second_browser_cannot_verify_first_session():
     """Test that second browser cannot verify first browser's session ID."""
     # Create first browser session
@@ -217,6 +229,7 @@ def test_checkout_with_wrong_origin_returns_403(unpaid_session):
     print(f"✓ Wrong origin: 403 Forbidden")
 
 
+@requires_paywall
 def test_checkout_with_unknown_lookup_returns_400(paid_session):
     """Test that checkout with unknown lookup key returns 400."""
     # First cancel existing subscription

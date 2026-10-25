@@ -136,7 +136,7 @@ export default function Buy() {
             </div>
           </div>
         </div>
-        {req.stage === "request" && <button className="btn btn-primary btn-lg" disabled={busy} onClick={() => call(`/buy/${rid}/start`, null, "Quote requests sent (simulated)")} data-testid="start-sourcing-btn">Start sourcing</button>}
+        {req.stage === "request" && <button className="btn btn-primary btn-lg" disabled={busy} onClick={() => call(`/buy/${rid}/start`, null, "Quote requests sent")} data-testid="start-sourcing-btn">Start sourcing</button>}
       </section>
 
       {/* SOURCING */}
@@ -146,7 +146,7 @@ export default function Buy() {
             {req.stage === "sourcing" && <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => call(`/buy/${rid}/advance`)} data-testid="next-round-btn">Next round</button>}
           </div>
           <div className="notice" data-testid="sealed-bid-notice"><Lock size={16} /> Sealed bids: each supplier thread is separate. Suppliers never see each other's quotes or your limits.</div>
-          <div className="lanes">{d.threads.map((t) => <Lane key={t.id} t={t} req={req} onCounter={(sid, price) => call(`/buy/${rid}/counter`, { supplier_id: sid, price: Number(price) }, "Counter sent (simulated)")} />)}</div>
+          <div className="lanes">{d.threads.map((t) => <Lane key={t.id} t={t} req={req} onCounter={(sid, price) => call(`/buy/${rid}/counter`, { supplier_id: sid, price: Number(price) }, "Counter sent")} />)}</div>
         </section>
       )}
 
@@ -240,7 +240,7 @@ export default function Buy() {
               <div><AlertTriangle size={18} /> <b>{ship.alert.text}</b></div>
               <div className="small">{ship.alert.detail}</div>
               <div className="btn-row">
-                <button className="btn btn-primary btn-sm" onClick={() => call(`/buy/${rid}/shipment/backup`, { choice: "hold" }, "Asked Bayside to hold backup stock (simulated)")} data-testid="hold-backup-btn">Ask Bayside to hold backup stock</button>
+                <button className="btn btn-primary btn-sm" onClick={() => call(`/buy/${rid}/shipment/backup`, { choice: "hold" }, "Asked Bayside to hold backup stock")} data-testid="hold-backup-btn">Ask Bayside to hold backup stock</button>
                 <button className="btn btn-ghost btn-sm" onClick={() => call(`/buy/${rid}/shipment/backup`, { choice: "wait" })} data-testid="keep-waiting-btn">Keep waiting</button>
               </div>
             </div>

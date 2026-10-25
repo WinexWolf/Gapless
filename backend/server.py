@@ -419,7 +419,7 @@ async def payday_summary():
              f"Secured {E.fmt_money(st['secured'])} against a {E.fmt_money(st['gap'])} gap:"]
     lines += [f"\u2022 {i['counterparty']} ({i['type_label']}): {E.fmt_money(i['amount'])}, cost {E.fmt_money(i['cost'])}, {i['note']}" for i in items]
     lines += [f"Total cost to close the gap: {E.fmt_money(total_cost)} ({pct}% of the gap).",
-              f"Friday projected balance: {E.fmt_money(fc['friday_balance'])}.", "Gapless \u00b7 demo, synthetic data"]
+              f"Friday projected balance: {E.fmt_money(fc['friday_balance'])}.", "Gapless"]
     return {"covered": st["covered"], "friday_label": fc["friday_label"], "payroll": payroll, "gap": st["gap"],
             "secured": st["secured"], "spare": st["spare"], "friday_balance": fc["friday_balance"], "items": items,
             "total_cost": total_cost, "cost_pct": pct, "text": "\n".join(lines)}
@@ -812,9 +812,90 @@ async def simulate_payroll():
 @api.post("/demo/simulate-next")
 async def simulate_next(payload: dict = Body(default={})):
     await ensure_seed()
+    settings = await get_settings()
+    if settings.get("mode") == "real":
+        return {"ok": False, "message": "Real mode is on. Counterparties reply on their own time — nothing is auto-generated. "
+                                        "Switch to Demo mode to simulate replies."}
     if payload.get("screen") == "buy":
         return await buy_next()
     return await simulate_payroll()
+
+
+# ------------------------------------------------------------------ guided walkthrough (both agents, end to end)
+
+def _buy_step_title(stage):
+    return {
+        "request": "Send the materials list to your suppliers",
+        "sourcing": "Negotiate quotes with the suppliers",
+        "quotes": "Recommend the best quote for your cash",
+        "pay": "Choose how to pay and protect Friday",
+        "spend": "Issue a one-time card for the exact amount",
+        "delivery": "Track the delivery to the job site",
+    }.get(stage, "Wrap up the order")
+
+
+async def walkthrough_next(origin):
+    """One deterministic step across both agents: payroll first, then buying.
+    All amounts/decisions stay in the Python engine; this only sequences existing flows."""
+    await ensure_seed()
+    settings = await get_settings()
+    if settings.get("mode") == "real":
+        raise HTTPException(400, "Switch to Demo mode to run the guided walkthrough.")
+
+    actions = await all_docs("actions")
+    has_proposed = any(a["status"] == "proposed" and a.get("selected") for a in actions)
+    has_active = any(a["status"] in E.ACTIVE_STATES for a in actions)
+
+    # ---- Phase 1: payroll gap agent
+    if has_proposed and not has_active:
+        n = await approve_all({"origin_url": origin})
+        return {"ok": True, "done": False, "phase": "payroll", "agent": "Payroll agent", "screen": "plan",
+                "title": "Maria approves the plan",
+                "narration": f"Maria reviews the ranked actions and approves {n['approved']} offers. "
+                             f"Each customer and supplier now has an offer waiting for a reply."}
+    if has_active:
+        r = await simulate_payroll()
+        if r.get("ok"):
+            return {"ok": True, "done": False, "phase": "payroll", "agent": "Payroll agent", "screen": "threads",
+                    "title": "A reply comes back", "narration": r["message"]}
+        # payroll resolved -> fall through into the buying agent
+
+    # ---- Phase 2: buying / materials agent
+    req = await get_req()
+    stage = req["stage"]
+    if stage not in ("done", "denied"):
+        title = _buy_step_title(stage)
+        r = await buy_next()
+        return {"ok": True, "done": False, "phase": "buy", "agent": "Buying agent", "screen": "buy",
+                "title": title, "narration": r.get("message", "")}
+
+    # ---- Done
+    _, _, fc, st = await status_bundle()
+    if st["covered"]:
+        narration = (f"Payroll on {fc['friday_label']} is covered with {E.fmt_money(st['spare'])} to spare, "
+                     f"and the materials order was delivered and matched to the approved quote.")
+    else:
+        narration = "The buying agent finished. Open the plan to close any remaining payroll gap."
+    return {"ok": True, "done": True, "phase": "done", "agent": "Done", "screen": "dashboard",
+            "title": "End to end, complete", "narration": narration, "covered": st["covered"]}
+
+
+@api.post("/demo/walkthrough/next")
+async def demo_walkthrough_next(payload: dict = Body(default={})):
+    return await walkthrough_next((payload.get("origin_url") or "").rstrip("/"))
+
+
+@api.get("/demo/walkthrough/status")
+async def demo_walkthrough_status():
+    await ensure_seed()
+    actions = await all_docs("actions")
+    _, _, fc, st = await status_bundle()
+    req = await get_req()
+    resolved = sum(1 for a in actions if a.get("selected") and a["status"] not in ("proposed",))
+    selected = sum(1 for a in actions if a.get("selected"))
+    return {"payroll": {"covered": st["covered"], "resolved": resolved, "selected": selected,
+                        "secured": st["secured"], "gap": st["gap"], "friday_label": fc["friday_label"]},
+            "buy": {"stage": req["stage"]}}
 
 
 # ------------------------------------------------------------------ settings, activity, outbox, threads
@@ -838,6 +919,8 @@ async def write_settings(payload: dict = Body(...)):
         upd["tone"] = payload["tone"]
     if payload.get("language") in ("en", "es"):
         upd["language"] = payload["language"]
+    if payload.get("mode") in ("demo", "real"):
+        upd["mode"] = payload["mode"]
     if "max_late_credit_pct" in payload:
         v = float(payload["max_late_credit_pct"])
         if not 0 <= v <= 5:
@@ -1488,7 +1571,7 @@ async def buy_next():
         return {"ok": True, "message": msg}
     if st == "spend":
         await buy_spend_approve(rid, {"approve": True})
-        return {"ok": True, "message": "Spend request approved in Link (test)"}
+        return {"ok": True, "message": "Spend request approved · one-time card issued"}
     if st == "delivery":
         s = await get_ship(rid)
         if s["step"] < 4:

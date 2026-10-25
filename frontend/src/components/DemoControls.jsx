@@ -3,9 +3,11 @@ import { useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import { ChevronRight, RotateCcw, SlidersHorizontal, X } from "lucide-react";
 import { http, errMsg, useApp } from "@/lib/api";
+import { useMode } from "@/lib/mode";
 
 export default function DemoControls() {
   const { bump, tick } = useApp();
+  const { isDemo } = useMode();
   const loc = useLocation();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -16,6 +18,8 @@ export default function DemoControls() {
   useEffect(() => {
     http.get("/settings").then((r) => setAi(!!r.data.supplier_has_ai)).catch(() => {});
   }, [tick]);
+
+  if (!isDemo || loc.pathname.startsWith("/walkthrough")) return null;
 
   const next = async () => {
     setBusy(true);

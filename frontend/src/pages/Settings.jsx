@@ -30,6 +30,11 @@ export default function Settings() {
     <div className="page narrow" data-testid="settings-page">
       <div className="page-head"><div><div className="eyebrow">Settings</div><h1 className="h1">Guardrails &amp; voice</h1></div></div>
       <section className="card">
+        <h2 className="h3">Mode</h2>
+        <p className="tiny muted">Demo plays the guided walkthrough with customers and suppliers replying for you. Real mode uses your own data and waits for real replies — nothing is auto-generated.</p>
+        <div className="set-row"><b>App mode</b><Seg k="mode" opts={[["demo", "Demo"], ["real", "Real"]]} /></div>
+      </section>
+      <section className="card">
         <h2 className="h3">Guardrails</h2>
         <p className="tiny muted">Enforced in code. Any counter above these is declined automatically and the thread shows why.</p>
         <div className="set-row"><label htmlFor="maxep"><b>Max early-pay discount</b></label><div className="suffix"><input id="maxep" className="input num" type="number" step="0.25" min="0" max="10" value={s.max_early_pay_pct} onChange={(e) => setS({ ...s, max_early_pay_pct: e.target.value })} data-testid="setting-max-early" /><span>%</span></div></div>

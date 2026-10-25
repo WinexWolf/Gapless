@@ -24,7 +24,7 @@ export default function Threads() {
     catch (e) { toast.error(errMsg(e)); }
   };
   const markPaid = async (t) => {
-    try { await http.post(`/actions/${t.action_id}/mark-paid`); toast.success("Marked as paid (demo)"); bump(); }
+    try { await http.post(`/actions/${t.action_id}/mark-paid`); toast.success("Marked as paid"); bump(); }
     catch (e) { toast.error(errMsg(e)); }
   };
 
@@ -59,13 +59,13 @@ export default function Threads() {
           </ol>
           {rem.filter((r) => r.action_id === t.action_id).map((r) => (
             <div className="reminder" key={r.id} data-testid={`reminder-${t.action_id}`}>
-              <div className="chips"><Chip kind="chip-teal">Scheduled reminder</Chip><Chip kind={r.status === "sent" ? "chip-green" : r.status === "approved" ? "chip-amber" : "chip-line"} testid="reminder-status">{r.status === "draft" ? "Needs your approval" : r.status === "approved" ? `Approved · goes out ${fdate(r.send_on)}` : r.status === "cancelled" ? "Not needed: paid early" : "Sent (simulated)"}</Chip></div>
+              <div className="chips"><Chip kind="chip-teal">Scheduled reminder</Chip><Chip kind={r.status === "sent" ? "chip-green" : r.status === "approved" ? "chip-amber" : "chip-line"} testid="reminder-status">{r.status === "draft" ? "Needs your approval" : r.status === "approved" ? `Approved · goes out ${fdate(r.send_on)}` : r.status === "cancelled" ? "Not needed: paid early" : "Sent"}</Chip></div>
               <div className="small"><b>{money(r.amount)}</b> second payment due {fdate(r.due_date)} · reminder on {fdate(r.send_on)}</div>
               <div className="draft-subject">{r.subject}</div>
               <pre className="draft-body small">{r.body}</pre>
               <div className="btn-row">
                 {r.status === "draft" && <button className="btn btn-primary btn-sm" onClick={() => remAct(r, "approve", "Reminder approved")} data-testid="approve-reminder-btn">Approve reminder</button>}
-                {r.status === "approved" && <button className="btn btn-ghost btn-sm" onClick={() => remAct(r, "send", "Reminder placed in the simulated outbox")} data-testid="send-reminder-btn">Send now (demo)</button>}
+                {r.status === "approved" && <button className="btn btn-ghost btn-sm" onClick={() => remAct(r, "send", "Reminder placed in the outbox")} data-testid="send-reminder-btn">Send now</button>}
               </div>
             </div>
           ))}
@@ -77,10 +77,10 @@ export default function Threads() {
               </>
             )}
             {t.type !== "extension" && ["approved", "accepted", "countered"].includes(t.status) && (
-              <button className="btn btn-ghost" onClick={() => markPaid(t)} data-testid={`thread-mark-paid-${t.action_id}`}>Mark as paid (demo)</button>
+              <button className="btn btn-ghost" onClick={() => markPaid(t)} data-testid={`thread-mark-paid-${t.action_id}`}>Mark as paid</button>
             )}
             {t.type === "split" && t.status === "paid" && !t.second_paid && (
-              <button className="btn btn-ghost" onClick={async () => { try { await http.post(`/actions/${t.action_id}/mark-second-paid`); toast.success("Second payment received"); bump(); } catch (e) { toast.error(errMsg(e)); } }} data-testid={`mark-second-paid-${t.action_id}`}>Mark 2nd payment received (demo)</button>
+              <button className="btn btn-ghost" onClick={async () => { try { await http.post(`/actions/${t.action_id}/mark-second-paid`); toast.success("Second payment received"); bump(); } catch (e) { toast.error(errMsg(e)); } }} data-testid={`mark-second-paid-${t.action_id}`}>Mark 2nd payment received</button>
             )}
             {t.type === "split" && t.second_paid && <Chip kind="chip-green" testid="second-paid-chip">Both payments received ✓</Chip>}
             {t.token && <a className="btn btn-ghost" href={`/o/${t.token}`} target="_blank" rel="noreferrer" data-testid={`thread-offer-link-${t.action_id}`}><ExternalLink size={16} /> Counterparty page</a>}

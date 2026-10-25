@@ -1,0 +1,62 @@
+{
+  "summary": "Completed comprehensive testing of always-unlocked paywall, guided walkthrough (both agents), and mode switching features. All backend APIs working correctly. Frontend walkthrough page functional with minor React Hooks fix applied.",
+  "backend_issues": {
+    "critical_bugs": [],
+    "flaky_endpoints": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "fixed_issues": [
+      {
+        "component": "DemoControls.jsx",
+        "issue": "React Hooks error - useEffect called after early return",
+        "fix": "Moved useEffect hook before the early return statement",
+        "status": "FIXED"
+      }
+    ]
+  },
+  "passed_tests": [
+    "Backend: GET /api/billing/status returns active=true, status='unlocked' (always-unlocked paywall)",
+    "Backend: POST /api/actions/approve-all works without 402 error",
+    "Backend: POST /api/buy/{rid}/start works without 402 error",
+    "Backend: POST /api/demo/walkthrough/next advances through 18 deterministic steps",
+    "Backend: Walkthrough covers both 'payroll' and 'buy' phases",
+    "Backend: GET /api/demo/walkthrough/status shows payroll.covered=true and buy.stage='done' at completion",
+    "Backend: PUT /api/settings switches mode between 'demo' and 'real'",
+    "Backend: POST /api/demo/walkthrough/next returns 400 in real mode (blocked)",
+    "Backend: POST /api/demo/simulate-next returns ok=false with 'Real mode' message in real mode",
+    "Backend: All existing core flows work (forecast, plan, threads, buy, settings, activity, outbox)",
+    "Frontend: Dashboard loads with mode pill in header",
+    "Frontend: Dashboard 'See it work' CTA navigates to /walkthrough",
+    "Frontend: Walkthrough page loads with hero, progress bar, and controls",
+    "Frontend: Play, Step once, and Restart buttons present and functional",
+    "Frontend: Step once advances walkthrough and adds items to timeline feed",
+    "Frontend: Mode switch to Real displays 'Switch to Demo mode' note",
+    "Frontend: Mode switch to Real hides play controls",
+    "Frontend: Mode switch back to Demo restores play controls",
+    "Frontend: No paywall UI blocking on dashboard, plan, threads, or buy pages",
+    "Frontend: Demo controls visible in Demo mode"
+  ],
+  "test_report_links": [
+    "/app/backend_test.py"
+  ],
+  "action_item_for_main_agent": "",
+  "updated_files": [
+    "/app/frontend/src/components/DemoControls.jsx"
+  ],
+  "success_percentage": {
+    "backend": "100% (41/41 tests passed)",
+    "frontend": "95% (19/20 tests passed, 1 test blocked by dashboard tour overlay - not a bug)"
+  },
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_test_itself": false,
+  "notes": [
+    "PAYWALL_ENABLED=false is intentional - 7 Stripe paywall pytest tests are skipped by design",
+    "All counterparty/supplier replies are deterministic/synthetic (not actual API calls)",
+    "Stripe is in test/sandbox mode",
+    "Outbox emails are simulated (not actually sent)",
+    "Demo reset and mode set to 'demo' after testing (cleanup completed)"
+  ]
+}

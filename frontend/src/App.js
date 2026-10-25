@@ -6,13 +6,16 @@ import { BillingProvider } from "@/lib/billing";
 import { ThemeSync } from "@/lib/theme";
 import BillingReturn from "@/pages/BillingReturn";
 import { Toaster } from "@/components/ui/sonner";
-import { LayoutDashboard, ListChecks, ShoppingCart, MessagesSquare, Menu } from "lucide-react";
+import { LayoutDashboard, ListChecks, ShoppingCart, MessagesSquare, Menu, Sparkles } from "lucide-react";
 import { AppCtx } from "@/lib/api";
+import { ModeProvider } from "@/lib/mode";
+import ModePill from "@/components/ModePill";
 import DemoControls from "@/components/DemoControls";
 import Dashboard from "@/pages/Dashboard";
 import Plan from "@/pages/Plan";
 import Threads from "@/pages/Threads";
 import Buy from "@/pages/Buy";
+import Walkthrough from "@/pages/Walkthrough";
 import More from "@/pages/More";
 import Settings from "@/pages/Settings";
 import Activity from "@/pages/Activity";
@@ -27,15 +30,17 @@ const NAV = [
   { to: "/plan", label: "Plan", icon: ListChecks, id: "plan" },
   { to: "/buy", label: "Buy", icon: ShoppingCart, id: "buy" },
   { to: "/threads", label: "Threads", icon: MessagesSquare, id: "threads" },
+  { to: "/walkthrough", label: "Demo", icon: Sparkles, id: "walkthrough" },
   { to: "/more", label: "More", icon: Menu, id: "more" },
 ];
 
 export function Footer() {
-  return <footer className="footer" data-testid="footer">Demo: synthetic data</footer>;
+  return <footer className="footer" data-testid="footer">Gapless</footer>;
 }
 
 function Shell() {
   return (
+    <ModeProvider>
     <div className="g-app">
       <header className="g-top">
         <div className="g-top-in">
@@ -48,6 +53,7 @@ function Shell() {
             ))}
           </nav>
           <div className="g-top-right">
+            <ModePill compact />
             <ThemeToggle compact />
             <div className="biz-pill" data-testid="biz-pill">Bay Remodel Co.</div>
           </div>
@@ -61,6 +67,7 @@ function Shell() {
           <Route path="/plan" element={<Plan />} />
           <Route path="/threads" element={<Threads />} />
           <Route path="/buy" element={<Buy />} />
+          <Route path="/walkthrough" element={<Walkthrough />} />
           <Route path="/more" element={<More />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/activity" element={<Activity />} />
@@ -79,6 +86,7 @@ function Shell() {
       </nav>
       <DemoControls />
     </div>
+    </ModeProvider>
   );
 }
 

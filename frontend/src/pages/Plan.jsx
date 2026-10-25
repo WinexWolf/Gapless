@@ -32,7 +32,7 @@ function ActionCard({ a, onReview, reload }) {
     catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
   };
   const markPaid = async () => {
-    try { await http.post(`/actions/${a.id}/mark-paid`); toast.success("Marked as paid (demo)"); reload(); }
+    try { await http.post(`/actions/${a.id}/mark-paid`); toast.success("Marked as paid"); reload(); }
     catch (e) { toast.error(errMsg(e)); }
   };
   const sent = a.status !== "proposed";
@@ -71,7 +71,7 @@ function ActionCard({ a, onReview, reload }) {
           </div>
         )}
         <div className="draft-meta tiny muted">
-          {sent ? "Sent message (simulated)" : `Draft · ${a.draft.tone} · ${a.draft.language === "es" ? "Español" : "English"} · ${a.draft.source}`}
+          {sent ? "Sent message" : `Draft · ${a.draft.tone} · ${a.draft.language === "es" ? "Español" : "English"} · ${a.draft.source}`}
         </div>
         {editing ? (
           <div className="edit">
@@ -102,7 +102,7 @@ function ActionCard({ a, onReview, reload }) {
           <a className="btn btn-ghost" href={`/o/${a.offer_token}`} target="_blank" rel="noreferrer" data-testid={`offer-link-${a.id}`}><ExternalLink size={16} /> Counterparty link</a>
         )}
         {sent && a.type !== "extension" && ["approved", "accepted", "countered"].includes(a.status) && (
-          <button className="btn btn-ghost" onClick={markPaid} data-testid={`mark-paid-${a.id}`}>Mark as paid (demo)</button>
+          <button className="btn btn-ghost" onClick={markPaid} data-testid={`mark-paid-${a.id}`}>Mark as paid</button>
         )}
         {sent && <Link to="/threads" className="btn btn-ghost" data-testid={`thread-link-${a.id}`}>View thread</Link>}
       </div>
@@ -133,10 +133,10 @@ export default function Plan() {
       const origin = window.location.origin;
       if (review.length > 1) {
         const r = await http.post("/actions/approve-all", { origin_url: origin });
-        toast.success(`${r.data.approved} messages approved and placed in the simulated outbox`);
+        toast.success(`${r.data.approved} messages approved and placed in the outbox`);
       } else {
         await http.post(`/actions/${review[0].id}/approve`, { origin_url: origin });
-        toast.success(`Approved. Message to ${review[0].counterparty} is in the simulated outbox`);
+        toast.success(`Approved. Message to ${review[0].counterparty} is in the outbox`);
       }
       setReview(null);
       bump();
@@ -203,7 +203,7 @@ export default function Plan() {
         footer={
           <>
             <button className="btn btn-ghost" onClick={() => setReview(null)}>Cancel</button>
-            <button className="btn btn-primary" onClick={confirm} disabled={busy} data-testid="confirm-approve-btn"><Send size={16} /> {busy ? "Sending…" : "Approve & send (simulated)"}</button>
+            <button className="btn btn-primary" onClick={confirm} disabled={busy} data-testid="confirm-approve-btn"><Send size={16} /> {busy ? "Sending…" : "Approve & send"}</button>
           </>
         }>
         {review && review.map((a) => (

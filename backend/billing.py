@@ -13,6 +13,8 @@ from pydantic import BaseModel, ConfigDict
 
 COOKIE = "gapless_demo_access"
 LOOKUP = "gapless_demo_monthly_v1"
+# Owner / admin: when the paywall is disabled every browser is unlocked (no Stripe needed).
+PAYWALL_ENABLED = os.environ.get("PAYWALL_ENABLED", "false").lower() == "true"
 # Editable sample catalog. Amounts and entitlement dates are owned by Python.
 MONTHLY_CENTS = 1900
 CURRENCY = "usd"
@@ -138,6 +140,8 @@ async def state(db, bid, refresh=False):
 
 
 async def gate(db, request):
+    if not PAYWALL_ENABLED:
+        return
     path = request.url.path
     protected = request.method not in ("GET", "HEAD", "OPTIONS") and (
         path.startswith(("/api/actions/", "/api/buy/", "/api/invoices", "/api/reminders/"))
@@ -175,6 +179,9 @@ def router(db):
     @api.get("/status", response_model=BillingStatus)
     async def status(request: Request, response: Response, session_id: str | None = None):
         response.headers["Cache-Control"] = "no-store"
+        if not PAYWALL_ENABLED:
+            return BillingStatus(active=True, status="unlocked", price_label="Included",
+                                 checkout_ready=False)
         bid = owner(request)
         if not bid:
             token = secrets.token_urlsafe(32)

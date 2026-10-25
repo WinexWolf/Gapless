@@ -1,26 +1,42 @@
 [
   {
-    "content": "Implement test subscription billing, server paywall and deterministic PNG endpoint",
+    "content": "Backend: add always-unlocked paywall bypass (PAYWALL_ENABLED env) in server.premium_guard + billing.gate/status",
     "status": "completed"
   },
   {
-    "content": "Build glass paywall, billing status and image-sharing UI",
+    "content": "Backend: add mode (demo/real) to settings + guard simulate/walkthrough in real mode",
     "status": "completed"
   },
   {
-    "content": "Add first-visit tour, theme favicon and full Spanish landing toggle",
+    "content": "Backend: add /api/demo/walkthrough/next endpoint driving payroll then buy with narration/titles",
     "status": "completed"
   },
   {
-    "content": "Fix paywall Escape and primary-button hover contrast",
+    "content": "Backend: soften prominent 'simulated/synthetic' copy (payday summary footer)",
     "status": "completed"
   },
   {
-    "content": "Verify 55 paid backend regressions, actual PNG download and responsive UI",
+    "content": "Frontend: build Walkthrough page (auto-play, phase trail, narration timeline, success state)",
     "status": "completed"
   },
   {
-    "content": "Confirm hosted Stripe card checkout and return in a normal browser; automated submission remains unverified",
-    "status": "pending"
+    "content": "Frontend: add Mode switch (Settings + header pill) + Mode context, hide DemoControls in real mode",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: route + CTAs (Dashboard, More, Landing) for Walkthrough; soften simulated/demo labels",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: add Walkthrough CSS to App.css following teal glass tokens",
+    "status": "completed"
+  },
+  {
+    "content": "Verify build (esbuild), restart services, test backend walkthrough + gate via curl, screenshots",
+    "status": "completed"
+  },
+  {
+    "content": "Run testing agent end-to-end and fix reported issues",
+    "status": "in_progress"
   }
 ]

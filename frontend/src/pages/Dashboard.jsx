@@ -1,8 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, RefreshCw, ArrowRight, LockKeyhole, Compass } from "lucide-react";
-import { useBilling } from "@/lib/billing";
+import { AlertTriangle, CheckCircle2, RefreshCw, ArrowRight, Compass, Sparkles } from "lucide-react";
 import { MotionButton } from "@/components/MotionButton";
 import { DashboardTour } from "@/components/DashboardTour";
 import { http, money, fdate, errMsg, useApp } from "@/lib/api";
@@ -14,7 +13,6 @@ import Confetti from "@/components/Confetti";
 
 export default function Dashboard() {
   const { tick } = useApp();
-  const { status: access, openPaywall } = useBilling();
   const [tourReplay, setTourReplay] = useState(0);
   const [fetchAttempt, setFetchAttempt] = useState(0);
   const [loadError, setLoadError] = useState("");
@@ -60,10 +58,10 @@ export default function Dashboard() {
       <Confetti fireKey={burstKey} />
       <DashboardTour replay={tourReplay} />
       <div className="dashboard-intro">
-        <div><div className="eyebrow" data-testid="dashboard-demo-label">BAY REMODEL CO. · SYNTHETIC DEMO</div><h1 className="h2" data-testid="dashboard-heading">Your week, in focus.</h1></div>
+        <div><div className="eyebrow" data-testid="dashboard-demo-label">BAY REMODEL CO.</div><h1 className="h2" data-testid="dashboard-heading">Your week, in focus.</h1></div>
         <div className="dashboard-intro-actions">
           <MotionButton className="icon-btn" onClick={() => setTourReplay(x=>x+1)} aria-label="Replay quick tour" data-testid="dashboard-replay-tour"><Compass size={19} /></MotionButton>
-          <MotionButton className="btn btn-ghost btn-sm" onClick={() => openPaywall()} data-testid="dashboard-access-button">{access?.active ? <CheckCircle2 size={16} /> : <LockKeyhole size={16} />}{access?.active ? "Demo access active" : "Monthly demo access"}</MotionButton>
+          <MotionButton asChild className="btn btn-primary btn-sm" data-testid="dashboard-walkthrough-cta"><Link to="/walkthrough"><Sparkles size={16} /> See it work</Link></MotionButton>
         </div>
       </div>
       {st.covered ? (
