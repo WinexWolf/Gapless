@@ -96,6 +96,21 @@ export default function Buy() {
         ))}
       </ol>
 
+      {req.delivery_stage && (
+        <section className="card" data-testid="supplier-delivery-status">
+          <h2 className="h3"><Truck size={18} /> Supplier delivery · {req.delivery_supplier_name || sel?.supplier_name || ""}</h2>
+          <p className="tiny muted">Live status, updated by the supplier from their portal.</p>
+          <ol className="ship-tl" data-testid="supplier-delivery-tl">
+            {(d.delivery_stages || []).map((s) => {
+              const keys = (d.delivery_stages || []).map((x) => x.key);
+              const done = keys.indexOf(s.key) <= keys.indexOf(req.delivery_stage);
+              return <li key={s.key} className={done ? "done" : ""} data-testid={`owner-delivery-${s.key}`}><span className="step-dot">{done ? <Check size={12} /> : ""}</span>{s.label}</li>;
+            })}
+          </ol>
+          <span className={`chip ${req.delivery_stage === "delivered" ? "chip-green" : "chip-teal"}`} data-testid="owner-delivery-chip">{d.delivery_label}</span>
+        </section>
+      )}
+
       {/* REQUEST */}
       <section className="card" data-testid="buy-request">
         <div className="sec-head"><h2 className="h3"><Inbox size={18} /> Simulated inbox · {req.inbox}</h2>

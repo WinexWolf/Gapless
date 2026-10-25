@@ -1,22 +1,38 @@
 [
   {
-    "content": "Multi-round negotiation agent (supplier): deterministic concession schedule, counters within guardrails, converges or closes",
+    "content": "Backend: Supplier delivery stages",
     "status": "completed"
   },
   {
-    "content": "Auto Winner Pick: buying agent auto-awards best agreed quote, creates PO, stands down losers, notifies all (owner + suppliers)",
+    "content": "Backend: Negotiation settings",
     "status": "completed"
   },
   {
-    "content": "Approvals inbox: pending queue for draft-and-wait quote awards + client counters; approve/reject executes the action",
+    "content": "Backend: Invite links",
     "status": "completed"
   },
   {
-    "content": "Fix supplier-quote due_date to ISO (downstream pay/award parsing)",
+    "content": "Backend: Approvals count endpoint",
     "status": "completed"
   },
   {
-    "content": "Verify end-to-end (negotiation, auto-award, approval-mode award, buy/current) + regression green + UI screenshot",
+    "content": "Frontend: SupplierPortal delivery tracker + owner Buy page delivery badge",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: Settings negotiation card",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: People invite section + /invite/:token accept page",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: Approvals badge on main nav via polling",
+    "status": "completed"
+  },
+  {
+    "content": "Test: backend smoke + testing agent + screenshots desktop/mobile (badge + 7-item nav verified)",
     "status": "completed"
   }
 ]

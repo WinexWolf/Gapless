@@ -2,13 +2,13 @@ import React, { useCallback, useEffect, useState } from "react";
 import "@/App.css";
 import { BrowserRouter, Routes, Route, NavLink, Link, Navigate } from "react-router-dom";
 import { MotionConfig } from "framer-motion";
-import { Show, UserButton } from "@clerk/react";
+import { Show, UserButton, RedirectToSignIn } from "@clerk/react";
 import { BillingProvider } from "@/lib/billing";
 import { ThemeSync } from "@/lib/theme";
 import BillingReturn from "@/pages/BillingReturn";
 import { Toaster } from "@/components/ui/sonner";
-import { LayoutDashboard, ListChecks, ShoppingCart, MessagesSquare, Menu, Sparkles, Loader2, RefreshCw } from "lucide-react";
-import { AppCtx, http } from "@/lib/api";
+import { LayoutDashboard, ListChecks, ShoppingCart, MessagesSquare, Menu, Sparkles, Loader2, RefreshCw, Inbox } from "lucide-react";
+import { AppCtx, http, useApp } from "@/lib/api";
 import { ModeProvider } from "@/lib/mode";
 import ModePill from "@/components/ModePill";
 import DemoControls from "@/components/DemoControls";
@@ -29,6 +29,7 @@ import Outbox from "@/pages/Outbox";
 import People from "@/pages/People";
 import Approvals from "@/pages/Approvals";
 import Offer from "@/pages/Offer";
+import InviteAccept from "@/pages/InviteAccept";
 import Landing from "@/pages/Landing";
 import Digest from "@/pages/Digest";
 import ThemeToggle from "@/components/ThemeToggle";
@@ -38,6 +39,7 @@ const NAV = [
   { to: "/plan", label: "Plan", icon: ListChecks, id: "plan" },
   { to: "/buy", label: "Buy", icon: ShoppingCart, id: "buy" },
   { to: "/threads", label: "Threads", icon: MessagesSquare, id: "threads" },
+  { to: "/approvals", label: "Approvals", icon: Inbox, id: "approvals" },
   { to: "/walkthrough", label: "Demo", icon: Sparkles, id: "walkthrough" },
   { to: "/more", label: "More", icon: Menu, id: "more" },
 ];
@@ -47,6 +49,17 @@ export function Footer() {
 }
 
 function Shell() {
+  const { tick } = useApp();
+  const [apprCount, setApprCount] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    const fetchCount = () => http.get("/approvals/count").then((r) => { if (alive) setApprCount(r.data?.pending || 0); }).catch(() => {});
+    fetchCount();
+    const t = setInterval(fetchCount, 20000);
+    return () => { alive = false; clearInterval(t); };
+  }, [tick]);
+  const badge = (id) => id === "approvals" && apprCount > 0
+    ? <span className="nav-badge" data-testid="nav-approvals-badge">{apprCount}</span> : null;
   return (
     <ModeProvider>
     <div className="g-app">
@@ -57,7 +70,7 @@ function Shell() {
           </Link>
           <nav className="top-nav" aria-label="Main">
             {NAV.map((n) => (
-              <NavLink key={n.to} to={n.to} end={n.to === "/"} className="top-link" data-testid={`nav-${n.id}`}>{n.label}</NavLink>
+              <NavLink key={n.to} to={n.to} end={n.to === "/"} className="top-link" data-testid={`nav-${n.id}`}>{n.label}{badge(n.id)}</NavLink>
             ))}
           </nav>
           <div className="g-top-right">
@@ -89,7 +102,7 @@ function Shell() {
       <nav className="g-bottom" aria-label="Main mobile">
         {NAV.map((n) => (
           <NavLink key={n.to} to={n.to} end={n.to === "/"} className="bottom-link" data-testid={`bnav-${n.id}`}>
-            <n.icon size={20} aria-hidden="true" />
+            <span className="bottom-icon">{<n.icon size={20} aria-hidden="true" />}{badge(n.id)}</span>
             <span>{n.label}</span>
           </NavLink>
         ))}
@@ -142,6 +155,15 @@ function AuthedApp() {
   );
 }
 
+function InviteRoute() {
+  return (
+    <>
+      <Show when="signed-in"><InviteAccept /></Show>
+      <Show when="signed-out"><RedirectToSignIn signInForceRedirectUrl={window.location.pathname} /></Show>
+    </>
+  );
+}
+
 export default function App() {
   const [tick, setTick] = useState(0);
   const bump = useCallback(() => setTick((t) => t + 1), []);
@@ -155,6 +177,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/o/:token" element={<Offer />} />
+          <Route path="/invite/:token" element={<InviteRoute />} />
           <Route path="/sign-in/*" element={<SignInPage />} />
           <Route path="/sign-up/*" element={<SignUpPage />} />
           <Route path="*" element={<AuthedApp />} />

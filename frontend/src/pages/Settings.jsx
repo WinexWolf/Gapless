@@ -15,6 +15,9 @@ export default function Settings() {
     try { const r = await http.put("/settings", s); setS(r.data); toast.success("Settings saved"); bump(); }
     catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
   };
+  const NEGO_PRESETS = { gentle: { nego_open_pct: 5, nego_max_rounds: 2 }, balanced: { nego_open_pct: 10, nego_max_rounds: 3 }, aggressive: { nego_open_pct: 18, nego_max_rounds: 5 } };
+  const setPreset = (v) => setS({ ...s, nego_style: v, ...NEGO_PRESETS[v] });
+  const setNego = (k, val) => setS({ ...s, nego_style: "custom", [k]: val });
   const Seg = ({ k, opts }) => (
     <div className="seg" role="group">
       {opts.map(([v, l]) => <button key={v} className={s[k] === v ? "on" : ""} onClick={() => setS({ ...s, [k]: v })} data-testid={`setting-${k}-${v}`}>{l}</button>)}
@@ -45,6 +48,20 @@ export default function Settings() {
             <button className={s.require_approval ? "on" : ""} onClick={() => setS({ ...s, require_approval: true })} data-testid="setting-autonomy-approve">Draft &amp; wait for me</button>
           </div>
         </div>
+      </section>
+      <section className="card">
+        <h2 className="h3">Negotiation</h2>
+        <p className="tiny muted">How hard the buying agent bargains with suppliers, and when it walks away — always within your budget cap, enforced in code.</p>
+        <div className="set-row"><div><b>Bargaining style</b><div className="tiny muted">Gentle opens close to the cap and concedes fast; aggressive opens lower and holds out longer.</div></div>
+          <div className="seg" role="group" aria-label="Bargaining style">
+            {[["gentle", "Gentle"], ["balanced", "Balanced"], ["aggressive", "Aggressive"]].map(([v, l]) => (
+              <button key={v} className={s.nego_style === v ? "on" : ""} onClick={() => setPreset(v)} data-testid={`setting-nego-${v}`}>{l}</button>
+            ))}
+          </div>
+        </div>
+        <div className="set-row"><label htmlFor="negoopen"><b>Open this far under the cap</b><div className="tiny muted">The agent's first offer, as a share of your budget cap.</div></label><div className="suffix"><input id="negoopen" className="input num" type="number" step="1" min="0" max="40" value={s.nego_open_pct} onChange={(e) => setNego("nego_open_pct", e.target.value)} data-testid="setting-nego-open" /><span>%</span></div></div>
+        <div className="set-row"><label htmlFor="negorounds"><b>Rounds before walking away</b><div className="tiny muted">How many counters before the agent passes on an over-budget supplier.</div></label><div className="suffix"><input id="negorounds" className="input num" type="number" step="1" min="1" max="8" value={s.nego_max_rounds} onChange={(e) => setNego("nego_max_rounds", e.target.value)} data-testid="setting-nego-rounds" /></div></div>
+        {s.nego_style === "custom" && <p className="tiny muted" data-testid="nego-custom-note">Using your custom numbers.</p>}
       </section>
       <section className="card">
         <h2 className="h3">Late deliveries</h2>

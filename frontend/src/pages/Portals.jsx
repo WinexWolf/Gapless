@@ -118,12 +118,21 @@ export function SupplierPortal({ me }) {
   useEffect(() => { load(); }, [load]);
   const req = d?.request;
   const cap = req?.mandate?.max_total;
+  const dv = d?.delivery;
   const submit = async () => {
     setBusy(true);
     try {
       const r = await http.post("/portal/supplier/quote", { price, terms, delivery_date: delivery, note });
       toast.success(r.data?.reaction?.message || "Quote sent");
       setPrice(""); setNote(""); load();
+    } catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
+  };
+  const advanceDelivery = async () => {
+    setBusy(true);
+    try {
+      const r = await http.post("/portal/supplier/delivery", {});
+      toast.success(`Marked "${r.data?.label}"`);
+      load();
     } catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
   };
   return (
@@ -161,6 +170,25 @@ export function SupplierPortal({ me }) {
             </>
           )}
         </section>
+
+        {dv && (
+          <section className="card" data-testid="supplier-delivery-card">
+            <h2 className="h3"><Truck size={16} /> Delivery — you won this order</h2>
+            <p className="tiny muted">Keep Bay Remodel Co. updated as the order moves.</p>
+            <ol className="ship-tl" data-testid="supplier-delivery-stages">
+              {(dv.stages || []).map((s) => {
+                const keys = (dv.stages || []).map((x) => x.key);
+                const done = dv.stage && keys.indexOf(s.key) <= keys.indexOf(dv.stage);
+                return <li key={s.key} className={done ? "done" : ""} data-testid={`sup-delivery-${s.key}`}><span className="step-dot">{done ? <Check size={12} /> : ""}</span>{s.label}</li>;
+              })}
+            </ol>
+            {dv.next ? (
+              <MotionButton className="btn btn-primary" disabled={busy} onClick={advanceDelivery} data-testid="supplier-advance-delivery"><Package size={16} /> Mark {dv.next_label}</MotionButton>
+            ) : (
+              <span className="chip chip-green" data-testid="supplier-delivered-chip"><Check size={13} /> Delivered</span>
+            )}
+          </section>
+        )}
 
         <section className="card">
           <h2 className="h3"><Truck size={16} /> Conversation</h2>

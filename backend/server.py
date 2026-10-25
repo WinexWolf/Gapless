@@ -61,6 +61,8 @@ async def access_guard(request: Request):
     role = member["role"]
     if path in _SELF_PATHS or path.startswith("/api/me"):
         return
+    if path.startswith("/api/invite/"):
+        return  # any signed-in user may view or accept an invite addressed to them
     if path.startswith("/api/portal/client"):
         need = "client"
     elif path.startswith("/api/portal/supplier"):
@@ -77,7 +79,7 @@ log = logging.getLogger("gapless")
 
 DEMO_COLLECTIONS = ["business", "receivables", "payables", "cashflow_events", "actions", "threads", "messages",
                     "offers", "payments", "settings", "activity_log", "purchase_requests", "rfq_threads", "quotes",
-                    "shipments", "outbox", "payment_transactions", "reminders", "supplier_history", "approvals"]
+                    "shipments", "outbox", "payment_transactions", "reminders", "supplier_history", "approvals", "invites"]
 NO_ID = {"_id": 0}
 BUY_SIGN = "Maria's assistant (on behalf of Maria Alvarez, Bay Remodel Co.)"
 _lock = asyncio.Lock()
@@ -338,16 +340,8 @@ async def create_approval(kind, title, detail, scope, ref, amount=None):
 
 
 # ---------------------------------------------------------------- buying agent: multi-round negotiation + auto award
-NEGO_MAX_ROUNDS = 3
-
-
-def _nego_target(cap, rnd):
-    """Deterministic concession: start ~10% under the cap, step up toward it each round, never above."""
-    if cap <= 0:
-        return 0.0
-    initial = E.r2(cap * 0.90)
-    step = (cap - initial) / NEGO_MAX_ROUNDS
-    return E.r2(min(cap, initial + step * max(rnd, 0)))
+# Negotiation targets/rounds are resolved deterministically in engine.nego_params/nego_target
+# from the owner's saved settings. No LLM ever touches the money.
 
 
 async def _supplier_contacts(rid, exclude_sid=None):
@@ -373,6 +367,7 @@ async def award_winner(rid, sid, origin=""):
     await db.quotes.update_many({"request_id": rid, "supplier_id": {"$ne": sid}}, {"$set": {"recommended": False}})
     await db.rfq_threads.update_one({"request_id": rid, "supplier_id": sid}, {"$set": {"status": "awarded"}})
     await db.purchase_requests.update_one({"id": rid}, {"$set": {"selected": sid, "stage": "pay"}})
+    await init_delivery(rid, sid, q["supplier_name"])
     await rfq_msg(rid, sid, "Maria's assistant", "us",
                   f"You won the order at {E.fmt_money(q['total'])} ({q['terms']}). We'll confirm payment next.",
                   {"type": "awarded", "price": q["total"]})
@@ -412,6 +407,18 @@ async def maybe_auto_award(rid, origin=""):
         return None  # already awarded
     winner = min(agreed, key=lambda q: q.get("effective_total", q["total"]))
     return await award_winner(rid, winner["supplier_id"], origin)
+
+
+async def init_delivery(rid, sid, name):
+    """Start the supplier-driven delivery tracker at 'accepted' when an order is won.
+    Idempotent — never resets a tracker that's already moving."""
+    req = await db.purchase_requests.find_one({"id": rid}, NO_ID)
+    if not req or req.get("delivery_stage"):
+        return
+    await db.purchase_requests.update_one({"id": rid}, {"$set": {
+        "delivery_stage": "accepted", "delivery_supplier": sid, "delivery_supplier_name": name,
+        "delivery_history": [{"stage": "accepted", "label": E.delivery_label("accepted"),
+                              "ts": now_iso(), "by": "system"}]}})
 
 
 
@@ -1103,6 +1110,18 @@ async def write_settings(payload: dict = Body(...)):
             upd[k] = bool(payload[k])
     if "require_approval" in payload:
         upd["require_approval"] = bool(payload["require_approval"])
+    if payload.get("nego_style") in ("gentle", "balanced", "aggressive", "custom"):
+        upd["nego_style"] = payload["nego_style"]
+    if "nego_open_pct" in payload:
+        v = float(payload["nego_open_pct"])
+        if not 0 <= v <= 40:
+            raise HTTPException(400, "nego_open_pct must be between 0 and 40")
+        upd["nego_open_pct"] = v
+    if "nego_max_rounds" in payload:
+        v = int(payload["nego_max_rounds"])
+        if not 1 <= v <= 8:
+            raise HTTPException(400, "nego_max_rounds must be between 1 and 8")
+        upd["nego_max_rounds"] = v
     await db.settings.update_one({"id": "settings"}, {"$set": upd})
     if "tone" in upd or "language" in upd:
         s2 = {**s, **upd}
@@ -1273,7 +1292,8 @@ async def buy_current():
     return {"request": req, "threads": threads, "quotes": quotes, "compare": compare, "shipment": ship,
             "pay_options": pay_options(req, sel, fc["friday_balance"], T), "friday_balance": fc["friday_balance"],
             "friday_label": fc["friday_label"], "status": st, "suppliers": E.SUPPLIERS,
-            "route": E.ROUTE, "steps": E.SHIP_STEPS}
+            "route": E.ROUTE, "steps": E.SHIP_STEPS, "delivery_stages": E.DELIVERY_STAGES,
+            "delivery_label": E.delivery_label(req.get("delivery_stage")) if req.get("delivery_stage") else None}
 
 
 @api.post("/buy/requests")
@@ -1481,6 +1501,7 @@ async def buy_approve_quote(rid: str, payload: dict = Body(...)):
                       f"Order confirmed. Optional: 2% off ({E.fmt_money(early)}) if paid by {E.fmt_date(wed)}.",
                       {"type": "early_pay_offer", "discount_pct": 2.0, "amount": early, "pay_by": E.iso(wed)})
     await db.purchase_requests.update_one({"id": rid}, {"$set": {"stage": "pay", "selected": sid}})
+    await init_delivery(rid, sid, q["supplier_name"])
     await log_activity(f"Maria approved {q['supplier_name']} at {E.fmt_money(q['total'])} ({q['terms']})", "buy", q["total"], "buy")
     return await buy_current()
 
@@ -1819,11 +1840,43 @@ async def portal_supplier_summary(request: Request):
     rfqs = await db.rfq_threads.find({"supplier_id": sid}, NO_ID).to_list(100)
     quotes = await db.quotes.find({"supplier_id": sid}, NO_ID).to_list(100)
     request_info = None
+    won = bool(req and req.get("selected") == sid)
     if req:
         request_info = {"id": req["id"], "items": req.get("items", []),
-                        "mandate": req.get("mandate", {}), "stage": req.get("stage")}
-    return {"name": name, "supplier_id": sid, "role": "supplier",
-            "request": request_info, "rfqs": rfqs, "quotes": quotes}
+                        "mandate": req.get("mandate", {}), "stage": req.get("stage"), "won": won}
+    delivery = None
+    if won:
+        stage = req.get("delivery_stage")
+        delivery = {"stage": stage, "label": E.delivery_label(stage) if stage else None,
+                    "history": req.get("delivery_history", []), "stages": E.DELIVERY_STAGES,
+                    "next": E.next_delivery_stage(stage), "next_label": E.delivery_label(E.next_delivery_stage(stage)) if E.next_delivery_stage(stage) else None}
+    return {"name": name, "supplier_id": sid, "role": "supplier", "won": won,
+            "request": request_info, "rfqs": rfqs, "quotes": quotes, "delivery": delivery}
+
+
+@api.post("/portal/supplier/delivery")
+async def portal_supplier_delivery(request: Request, payload: dict = Body(default={})):
+    """The winning supplier advances the delivery tracker one stage at a time.
+    Deterministic transition (accepted -> shipped -> out_for_delivery -> delivered)."""
+    m = await _me(request)
+    sid, name = m.get("linked_id"), m.get("linked_name")
+    req = await get_req()
+    if not req:
+        raise HTTPException(400, "There is no active order to update right now.")
+    if req.get("selected") != sid:
+        raise HTTPException(403, "You can only update delivery for an order you won.")
+    current = req.get("delivery_stage")
+    nxt = E.next_delivery_stage(current)
+    if nxt is None:
+        raise HTTPException(400, "This order is already marked delivered.")
+    hist = list(req.get("delivery_history") or [])
+    hist.append({"stage": nxt, "label": E.delivery_label(nxt), "ts": now_iso(), "by": "supplier"})
+    await db.purchase_requests.update_one({"id": req["id"]}, {"$set": {"delivery_stage": nxt, "delivery_history": hist}})
+    await log_activity(f"{name} marked the materials order '{E.delivery_label(nxt)}'", "buy", scope="buy")
+    await email_owner(f"{name}: {E.delivery_label(nxt)}", "Delivery update —",
+                      [f"{name} marked the materials order '{E.delivery_label(nxt)}'."])
+    return {"ok": True, "delivery_stage": nxt, "label": E.delivery_label(nxt),
+            "next": E.next_delivery_stage(nxt), "stages": E.DELIVERY_STAGES, "history": hist}
 
 
 @api.post("/portal/supplier/quote")
@@ -1861,9 +1914,11 @@ async def portal_supplier_quote(request: Request, payload: dict = Body(default={
     risk, eff = E.reliability_adjust(price, on_time)
     within = (cap <= 0) or (price <= cap)
 
+    settings = await get_settings()
+    _, nego_max = E.nego_params(settings)
     prev = await db.quotes.find_one({"request_id": rid, "supplier_id": sid}, NO_ID)
     rnd = int(((prev or {}).get("nego") or {}).get("round", 0))
-    target = _nego_target(cap, rnd)
+    target = E.nego_target(cap, rnd, settings)
 
     q = {"id": (prev or {}).get("id") or uid("q"), "request_id": rid, "supplier_id": sid, "supplier_name": name,
          "lane": "agent_human", "lines": [], "total": price, "terms": terms,
@@ -1876,11 +1931,10 @@ async def portal_supplier_quote(request: Request, payload: dict = Body(default={
                   f"Quote: {E.fmt_money(price)}, {terms}, delivery {delivery}.{(' ' + note) if note else ''}",
                   {"type": "quote", "price": price, "terms": terms})
 
-    settings = await get_settings()
     auto = not settings.get("require_approval", True)
 
     # ---- deterministic multi-round negotiation (no LLM touches the money)
-    agreed = (cap > 0 and price <= target) or (within and rnd >= NEGO_MAX_ROUNDS)
+    agreed = (cap > 0 and price <= target) or (within and rnd >= nego_max)
     if agreed:
         await db.quotes.update_one({"request_id": rid, "supplier_id": sid},
                                    {"$set": {"nego_status": "agreed", "within_mandate": True}})
@@ -1902,7 +1956,7 @@ async def portal_supplier_quote(request: Request, payload: dict = Body(default={
                                   f"{name} agreed to {E.fmt_money(price)} ({terms}), within your {E.fmt_money(cap)} budget.",
                                   "buy", {"rid": rid, "supplier_id": sid}, price)
             reaction = {"status": "pending_owner", "message": "Agreed — waiting for Maria to confirm the order."}
-    elif rnd >= NEGO_MAX_ROUNDS:
+    elif rnd >= nego_max:
         await db.quotes.update_one({"request_id": rid, "supplier_id": sid}, {"$set": {"nego_status": "rejected"}})
         await rfq_msg(rid, sid, "Maria's assistant", "us",
                       f"Thanks {name}, but {E.fmt_money(price)} is still above our {E.fmt_money(cap)} budget after a few rounds — we'll pass this time.")
@@ -1911,7 +1965,7 @@ async def portal_supplier_quote(request: Request, payload: dict = Body(default={
         if auto:
             await maybe_auto_award(rid, origin)
     else:
-        nxt = _nego_target(cap, rnd + 1)
+        nxt = E.nego_target(cap, rnd + 1, settings)
         await db.quotes.update_one({"request_id": rid, "supplier_id": sid},
                                    {"$set": {"nego_status": "negotiating", "nego": {"round": rnd + 1, "target": nxt}}})
         await rfq_msg(rid, sid, "Rule check (code)", "code",
@@ -1928,7 +1982,78 @@ async def portal_supplier_quote(request: Request, payload: dict = Body(default={
     return {"ok": True, "reaction": reaction}
 
 
+# ---------------------------------------------------------------- invites (owner -> counterparty portal)
+@api.post("/invites")
+async def create_invite(request: Request, payload: dict = Body(default={})):
+    """Owner creates a tokenized invite for a specific client/supplier. Optionally emails it.
+    Always returns a copyable deep link to /invite/{token}."""
+    kind = payload.get("kind")
+    cid = payload.get("id")
+    email = (payload.get("email") or "").strip()[:200]
+    origin = (payload.get("origin_url") or request.headers.get("origin") or "").rstrip("/")
+    if kind not in ("client", "supplier"):
+        raise HTTPException(400, "kind must be client or supplier")
+    options = await auth_roles.claimable_counterparties(db)
+    pool = options["clients"] if kind == "client" else options["suppliers"]
+    match = next((c for c in pool if c["id"] == cid), None)
+    if not match:
+        raise HTTPException(404, "Unknown counterparty")
+    token = uid("inv")
+    await db.invites.insert_one({"id": token, "token": token, "kind": kind, "linked_id": cid,
+                                 "linked_name": match["name"], "email": email or None, "status": "pending",
+                                 "created_at": now_iso(), "accepted_by": None, "accepted_at": None,
+                                 "env": auth_roles.ENV})
+    url = f"{origin}/invite/{token}" if origin else f"/invite/{token}"
+    emailed = False
+    if email:
+        emailed = bool(await email_util.send_email(
+            to=email, subject=f"{E.BUSINESS_NAME} invited you to their portal",
+            html=email_util.notify_html(
+                f"Hi {match['name']},",
+                [f"{E.BUSINESS_NAME} has invited you to their {kind} portal on Gapless.",
+                 "Sign in with Google to accept and see what needs you."],
+                "Open your portal", url if url.startswith("https://") else None)))
+    await log_activity(f"Invite created for {match['name']} ({kind}){' and emailed' if emailed else ''}", "system")
+    return {"ok": True, "token": token, "url": url, "emailed": emailed,
+            "linked_name": match["name"], "kind": kind}
+
+
+@api.get("/invites")
+async def list_invites(request: Request):
+    rows = await db.invites.find({"env": auth_roles.ENV}, NO_ID).sort("created_at", -1).to_list(100)
+    return {"invites": rows}
+
+
+@api.get("/invite/{token}")
+async def get_invite(token: str, request: Request):
+    inv = await db.invites.find_one({"token": token}, NO_ID)
+    if not inv:
+        raise HTTPException(404, "This invite link is not valid.")
+    return {"kind": inv["kind"], "linked_name": inv["linked_name"], "status": inv["status"]}
+
+
+@api.post("/invite/{token}/accept")
+async def accept_invite(token: str, request: Request):
+    user = require_user(request)
+    inv = await db.invites.find_one({"token": token}, NO_ID)
+    if not inv:
+        raise HTTPException(404, "This invite link is not valid.")
+    if inv["status"] == "accepted" and inv.get("accepted_by") != user["user_id"]:
+        raise HTTPException(409, "This invite has already been used by someone else.")
+    member = await auth_roles.claim_counterparty(db, user, inv["kind"], inv["linked_id"])
+    await db.invites.update_one({"token": token}, {"$set": {"status": "accepted",
+                                "accepted_by": user["user_id"], "accepted_at": now_iso()}})
+    return {"ok": True, "role": member["role"], "linked_name": member.get("linked_name")}
+
+
 # ---------------------------------------------------------------- approvals inbox endpoints
+@api.get("/approvals/count")
+async def approvals_count(request: Request):
+    """Lightweight pending count for the nav badge."""
+    n = await db.approvals.count_documents({"status": "pending"})
+    return {"pending": n}
+
+
 @api.get("/approvals")
 async def list_approvals(request: Request):
     pending = await db.approvals.find({"status": "pending"}, NO_ID).sort("created_at", -1).to_list(200)

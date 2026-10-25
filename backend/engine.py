@@ -94,7 +94,64 @@ def seed_docs(T):
 DEFAULT_SETTINGS = {"id": "settings", "max_early_pay_pct": 2.0, "max_ext_fee_pct": 1.0,
                     "require_approval": True, "tone": "friendly", "language": "en",
                     "supplier_has_ai": True, "llm_force_fail": False,
-                    "max_late_credit_pct": 2.0, "auto_late_credit": True, "mode": "demo"}
+                    "max_late_credit_pct": 2.0, "auto_late_credit": True, "mode": "demo",
+                    "nego_style": "balanced", "nego_open_pct": 10.0, "nego_max_rounds": 3}
+
+
+# ---------------------------------------------------------------- supplier delivery (real portal)
+# The winning supplier drives these stages from their portal. Deterministic, no LLM.
+DELIVERY_STAGES = [
+    {"key": "accepted", "label": "Order accepted"},
+    {"key": "shipped", "label": "Shipped"},
+    {"key": "out_for_delivery", "label": "Out for delivery"},
+    {"key": "delivered", "label": "Delivered"},
+]
+DELIVERY_KEYS = [s["key"] for s in DELIVERY_STAGES]
+DELIVERY_LABEL = {s["key"]: s["label"] for s in DELIVERY_STAGES}
+
+
+def delivery_label(key):
+    return DELIVERY_LABEL.get(key, "Not started")
+
+
+def next_delivery_stage(current):
+    """Return the next stage key after `current`, or None if already delivered/unknown."""
+    if current not in DELIVERY_KEYS:
+        return DELIVERY_KEYS[0]
+    i = DELIVERY_KEYS.index(current)
+    return DELIVERY_KEYS[i + 1] if i + 1 < len(DELIVERY_KEYS) else None
+
+
+# ---------------------------------------------------------------- buying negotiation (deterministic)
+# Presets map to how far under the cap the agent opens and how many rounds it bargains
+# before walking away. "custom" uses the owner's exact open% / max-rounds.
+NEGO_PRESETS = {
+    "gentle": {"open_pct": 5.0, "max_rounds": 2},
+    "balanced": {"open_pct": 10.0, "max_rounds": 3},
+    "aggressive": {"open_pct": 18.0, "max_rounds": 5},
+}
+
+
+def nego_params(settings):
+    """Resolve (open_pct, max_rounds) from settings. Preset wins unless style == 'custom'."""
+    style = (settings or {}).get("nego_style", "balanced")
+    if style in NEGO_PRESETS:
+        p = NEGO_PRESETS[style]
+        return p["open_pct"], p["max_rounds"]
+    open_pct = float((settings or {}).get("nego_open_pct", 10.0))
+    rounds = int((settings or {}).get("nego_max_rounds", 3))
+    return max(0.0, min(40.0, open_pct)), max(1, min(8, rounds))
+
+
+def nego_target(cap, rnd, settings):
+    """Deterministic concession: open `open_pct`% under the cap, step up toward it each
+    round, never above the cap. Identical inputs always give the same number."""
+    if cap <= 0:
+        return 0.0
+    open_pct, max_rounds = nego_params(settings)
+    initial = r2(cap * (1 - open_pct / 100.0))
+    step = (cap - initial) / max_rounds
+    return r2(min(cap, initial + step * max(rnd, 0)))
 
 
 # ---------------------------------------------------------------- forecast
