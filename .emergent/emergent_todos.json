@@ -1,30 +1,22 @@
 [
   {
-    "content": "Study existing offer accept/counter/decline + buy supplier quote logic to reuse for portal replies",
+    "content": "Multi-round negotiation agent (supplier): deterministic concession schedule, counters within guardrails, converges or closes",
     "status": "completed"
   },
   {
-    "content": "Owner People View: /api/auth/people frontend page (who signed in + linkage) under More",
+    "content": "Auto Winner Pick: buying agent auto-awards best agreed quote, creates PO, stands down losers, notifies all (owner + suppliers)",
     "status": "completed"
   },
   {
-    "content": "Autonomy toggle: surface require_approval as 'agents act within guardrails vs draft & wait' in Settings + wire semantics",
+    "content": "Approvals inbox: pending queue for draft-and-wait quote awards + client counters; approve/reject executes the action",
     "status": "completed"
   },
   {
-    "content": "Client portal replies: accept / counter / commit pay date wired to deterministic offer logic; agent reacts live",
+    "content": "Fix supplier-quote due_date to ISO (downstream pay/award parsing)",
     "status": "completed"
   },
   {
-    "content": "Supplier portal replies: submit quote / counter wired to buy engine; buying agent reacts within guardrails or drafts",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 6: Real email alerts via Emergent-managed Resend (offer/RFQ sent + reply received) with portal deep links",
-    "status": "completed"
-  },
-  {
-    "content": "Test portals + agent reactions + email end-to-end (Clerk tokens) and keep regression green",
+    "content": "Verify end-to-end (negotiation, auto-award, approval-mode award, buy/current) + regression green + UI screenshot",
     "status": "completed"
   }
 ]

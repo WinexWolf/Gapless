@@ -798,3 +798,7 @@ textarea.input { resize: vertical; }
 
 .people-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .people-right { display: inline-flex; align-items: center; gap: 10px; }
+
+.approval-item { }
+.approval-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.approval-title { font-weight: 650; color: var(--ink); margin-top: 8px; }

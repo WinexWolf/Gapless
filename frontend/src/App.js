@@ -27,6 +27,7 @@ import Settings from "@/pages/Settings";
 import Activity from "@/pages/Activity";
 import Outbox from "@/pages/Outbox";
 import People from "@/pages/People";
+import Approvals from "@/pages/Approvals";
 import Offer from "@/pages/Offer";
 import Landing from "@/pages/Landing";
 import Digest from "@/pages/Digest";
@@ -80,6 +81,7 @@ function Shell() {
           <Route path="/activity" element={<Activity />} />
           <Route path="/outbox" element={<Outbox />} />
           <Route path="/people" element={<People />} />
+          <Route path="/approvals" element={<Approvals />} />
           <Route path="*" element={<Dashboard />} />
         </Routes>
         <Footer />

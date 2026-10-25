@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { Settings as Cog, Activity as Act, Send, ChevronRight, FilePlus2, CalendarDays, Home, Sparkles, Users } from "lucide-react";
+import { Settings as Cog, Activity as Act, Send, ChevronRight, FilePlus2, CalendarDays, Home, Sparkles, Users, Inbox } from "lucide-react";
 import { http, errMsg, useApp } from "@/lib/api";
 
 const EMPTY = { kind: "receivable", party: "", number: "", amount: "", due_date: "" };
@@ -27,7 +27,7 @@ export default function More() {
     try { await http.post("/invoices", { ...f, amount: Number(f.amount) }); toast.success("Invoice added to the forecast"); setF(EMPTY); setText(""); setSrc(""); bump(); }
     catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
   };
-  const links = [["/", "Back to home", Home], ["/walkthrough", "Guided walkthrough", Sparkles], ["/people", "People", Users], ["/digest", "Monday digest", CalendarDays], ["/activity", "Activity log", Act], ["/outbox", "Outbox", Send], ["/settings", "Settings", Cog]];
+  const links = [["/", "Back to home", Home], ["/approvals", "Approvals", Inbox], ["/walkthrough", "Guided walkthrough", Sparkles], ["/people", "People", Users], ["/digest", "Monday digest", CalendarDays], ["/activity", "Activity log", Act], ["/outbox", "Outbox", Send], ["/settings", "Settings", Cog]];
 
   return (
     <div className="page narrow" data-testid="more-page">

@@ -77,7 +77,7 @@ log = logging.getLogger("gapless")
 
 DEMO_COLLECTIONS = ["business", "receivables", "payables", "cashflow_events", "actions", "threads", "messages",
                     "offers", "payments", "settings", "activity_log", "purchase_requests", "rfq_threads", "quotes",
-                    "shipments", "outbox", "payment_transactions", "reminders", "supplier_history"]
+                    "shipments", "outbox", "payment_transactions", "reminders", "supplier_history", "approvals"]
 NO_ID = {"_id": 0}
 BUY_SIGN = "Maria's assistant (on behalf of Maria Alvarez, Bay Remodel Co.)"
 _lock = asyncio.Lock()
@@ -320,6 +320,101 @@ async def email_owner(subject, greeting, lines):
     for to in admins[:2]:
         await email_util.send_email(to=to, subject=subject,
                                     html=email_util.notify_html(greeting, lines, None, None))
+
+
+# ---------------------------------------------------------------- approvals inbox
+async def create_approval(kind, title, detail, scope, ref, amount=None):
+    """Queue an item that needs the owner's decision (draft-and-wait mode or client counters)."""
+    existing = await db.approvals.find_one({"kind": kind, "ref": ref, "status": "pending"}, NO_ID)
+    if existing:
+        await db.approvals.update_one({"id": existing["id"]},
+                                      {"$set": {"title": title, "detail": detail, "amount": amount}})
+        return existing["id"]
+    aid = uid("apr")
+    await db.approvals.insert_one({"id": aid, "kind": kind, "title": title, "detail": detail,
+                                   "scope": scope, "ref": ref, "amount": amount, "status": "pending",
+                                   "created_at": now_iso()})
+    return aid
+
+
+# ---------------------------------------------------------------- buying agent: multi-round negotiation + auto award
+NEGO_MAX_ROUNDS = 3
+
+
+def _nego_target(cap, rnd):
+    """Deterministic concession: start ~10% under the cap, step up toward it each round, never above."""
+    if cap <= 0:
+        return 0.0
+    initial = E.r2(cap * 0.90)
+    step = (cap - initial) / NEGO_MAX_ROUNDS
+    return E.r2(min(cap, initial + step * max(rnd, 0)))
+
+
+async def _supplier_contacts(rid, exclude_sid=None):
+    rows = await db.user_profiles.find({"role": "supplier"}, NO_ID).to_list(200)
+    return rows
+
+
+async def award_winner(rid, sid, origin=""):
+    """Award the order to one supplier's agreed quote: create the PO, mark the winner,
+    stand down the others, and notify everyone. Deterministic — no LLM."""
+    q = await db.quotes.find_one({"request_id": rid, "supplier_id": sid}, NO_ID)
+    if not q:
+        raise HTTPException(404, "Quote not found")
+    req = await get_req(rid)
+    if not q.get("within_mandate", True):
+        raise HTTPException(400, f"{E.fmt_money(q['total'])} is above your {E.fmt_money(req['mandate']['max_total'])} limit")
+    await db.payables.update_one(
+        {"id": f"pay_mat_{rid}"},
+        {"$set": {"id": f"pay_mat_{rid}", "vendor": f"{q['supplier_name']} (materials)", "number": "PO-" + rid[-5:].upper(),
+                  "amount": q["total"], "due_date": q.get("due_date"), "status": "scheduled", "kind": "materials"}}, upsert=True)
+    await db.quotes.update_one({"request_id": rid, "supplier_id": sid},
+                               {"$set": {"recommended": True, "nego_status": "awarded"}})
+    await db.quotes.update_many({"request_id": rid, "supplier_id": {"$ne": sid}}, {"$set": {"recommended": False}})
+    await db.rfq_threads.update_one({"request_id": rid, "supplier_id": sid}, {"$set": {"status": "awarded"}})
+    await db.purchase_requests.update_one({"id": rid}, {"$set": {"selected": sid, "stage": "pay"}})
+    await rfq_msg(rid, sid, "Maria's assistant", "us",
+                  f"You won the order at {E.fmt_money(q['total'])} ({q['terms']}). We'll confirm payment next.",
+                  {"type": "awarded", "price": q["total"]})
+    await log_activity(f"Buying agent awarded the order to {q['supplier_name']} at {E.fmt_money(q['total'])}", "buy", q["total"], "buy")
+    await email_counterparty(q["supplier_name"], f"{E.BUSINESS_NAME}: you won the order",
+                             f"Hi {q['supplier_name']},",
+                             [f"{E.BUSINESS_NAME} has awarded the materials order to you at {E.fmt_money(q['total'])} ({q['terms']}).",
+                              "Sign in to your portal to confirm and arrange delivery."], "Open your portal", origin)
+    # stand down the other suppliers who bid
+    losers = await db.quotes.find({"request_id": rid, "supplier_id": {"$ne": sid}}, NO_ID).to_list(50)
+    for lq in losers:
+        await db.rfq_threads.update_one({"request_id": rid, "supplier_id": lq["supplier_id"]}, {"$set": {"status": "not_selected"}})
+        await rfq_msg(rid, lq["supplier_id"], "Maria's assistant", "us",
+                      "Thanks for quoting — we went with another supplier this time. We'll keep you in mind next run.")
+        await email_counterparty(lq["supplier_name"], f"{E.BUSINESS_NAME}: order update",
+                                 f"Hi {lq['supplier_name']},",
+                                 ["Thanks for your quote. We awarded this order to another supplier this time.",
+                                  "We'll be in touch on the next one."], None, origin)
+    await email_owner(f"Order awarded to {q['supplier_name']}",
+                      "Order awarded —", [f"The buying agent awarded the materials order to {q['supplier_name']} at {E.fmt_money(q['total'])} ({q['terms']})."])
+    return q
+
+
+async def maybe_auto_award(rid, origin=""):
+    """Auto-award when autonomy allows, at least one quote is agreed, and no one is still negotiating."""
+    settings = await get_settings()
+    if settings.get("require_approval", True):
+        return None  # draft-and-wait handles this through the approvals inbox
+    threads = await all_docs("rfq_threads", {"request_id": rid})
+    if any(t.get("status") == "negotiating" for t in threads):
+        return None  # someone is mid-negotiation; wait
+    quotes = await all_docs("quotes", {"request_id": rid})
+    agreed = [q for q in quotes if q.get("nego_status") == "agreed" and q.get("within_mandate", True)]
+    if not agreed:
+        return None
+    if any(q.get("nego_status") == "awarded" for q in quotes):
+        return None  # already awarded
+    winner = min(agreed, key=lambda q: q.get("effective_total", q["total"]))
+    return await award_winner(rid, winner["supplier_id"], origin)
+
+
+
 
 
 async def approve_one(aid, payload):
@@ -742,6 +837,9 @@ async def offer_counter(token: str, payload: dict = Body(...)):
     await log_activity(f"{a['counterparty']} countered; waiting for Maria", "counter")
     await email_owner(f"{a['counterparty']} sent a counter-offer",
                       "Action needed —", [f"{a['counterparty']} countered on invoice {a['invoice_number']}. Review it in your Threads to approve or hold."])
+    await create_approval("client_counter", f"{a['counterparty']} countered your offer",
+                          f"{a['counterparty']} proposed new terms on invoice {a['invoice_number']}. Approve to accept, or reject to hold.",
+                          "payroll", {"action_id": a["id"], "token": token}, a.get("amount"))
     return {**(await offer_public(token)), "guardrail": {"blocked": False}}
 
 
@@ -1735,6 +1833,7 @@ async def portal_supplier_quote(request: Request, payload: dict = Body(default={
     autonomy allows, otherwise hold it for Maria's approval. No LLM touches the money."""
     m = await _me(request)
     sid, name = m.get("linked_id"), m.get("linked_name")
+    origin = (payload.get("origin_url") or request.headers.get("origin") or "").rstrip("/")
     req = await get_req()
     if not req:
         raise HTTPException(400, "There is no active materials request to quote on yet.")
@@ -1762,11 +1861,16 @@ async def portal_supplier_quote(request: Request, payload: dict = Body(default={
     risk, eff = E.reliability_adjust(price, on_time)
     within = (cap <= 0) or (price <= cap)
 
-    q = {"id": uid("q"), "request_id": rid, "supplier_id": sid, "supplier_name": name, "lane": "agent_human",
-         "lines": [], "total": price, "terms": terms, "due_date": delivery, "delivery": delivery,
+    prev = await db.quotes.find_one({"request_id": rid, "supplier_id": sid}, NO_ID)
+    rnd = int(((prev or {}).get("nego") or {}).get("round", 0))
+    target = _nego_target(cap, rnd)
+
+    q = {"id": (prev or {}).get("id") or uid("q"), "request_id": rid, "supplier_id": sid, "supplier_name": name,
+         "lane": "agent_human", "lines": [], "total": price, "terms": terms,
+         "due_date": E.iso(E.friday_for(today())), "delivery": delivery,
          "on_time": on_time, "orders_on_record": hist.get("orders", 0), "late_recent": hist.get("late_recent", 0),
          "reliability_risk": risk, "effective_total": eff, "within_mandate": within, "recommended": False,
-         "source": "supplier_portal"}
+         "source": "supplier_portal", "nego": {"round": rnd, "target": target}}
     await db.quotes.update_one({"request_id": rid, "supplier_id": sid}, {"$set": q}, upsert=True)
     await rfq_msg(rid, sid, name, "them",
                   f"Quote: {E.fmt_money(price)}, {terms}, delivery {delivery}.{(' ' + note) if note else ''}",
@@ -1774,30 +1878,89 @@ async def portal_supplier_quote(request: Request, payload: dict = Body(default={
 
     settings = await get_settings()
     auto = not settings.get("require_approval", True)
-    if not within:
-        await rfq_msg(rid, sid, "Rule check (code)", "code",
-                      f"{E.fmt_money(price)} is above the {E.fmt_money(cap)} budget cap.", internal=True)
-        await rfq_msg(rid, sid, "Maria's assistant", "us",
-                      f"Thanks {name}. That's above our {E.fmt_money(cap)} budget — can you do {E.fmt_money(cap)}, keep {terms}?",
-                      {"type": "counter", "price": cap, "terms": terms})
-        await db.rfq_threads.update_one({"request_id": rid, "supplier_id": sid}, {"$set": {"status": "negotiating"}})
-        reaction = {"status": "countered", "message": f"That's above budget — the buying agent countered at {E.fmt_money(cap)}."}
-    elif auto:
+
+    # ---- deterministic multi-round negotiation (no LLM touches the money)
+    agreed = (cap > 0 and price <= target) or (within and rnd >= NEGO_MAX_ROUNDS)
+    if agreed:
+        await db.quotes.update_one({"request_id": rid, "supplier_id": sid},
+                                   {"$set": {"nego_status": "agreed", "within_mandate": True}})
         await rfq_msg(rid, sid, "Rule check (code)", "code",
                       f"{E.fmt_money(price)} is within the {E.fmt_money(cap)} budget. Effective cost {E.fmt_money(eff)}.", internal=True)
+        if auto:
+            await rfq_msg(rid, sid, "Maria's assistant", "us",
+                          f"Deal — {E.fmt_money(price)} works. You're on the shortlist; we'll confirm the winner shortly.")
+            await db.rfq_threads.update_one({"request_id": rid, "supplier_id": sid}, {"$set": {"status": "final"}})
+            awarded = await maybe_auto_award(rid, origin)
+            reaction = {"status": "awarded" if (awarded and awarded["supplier_id"] == sid) else "shortlisted",
+                        "message": ("You won the order!" if (awarded and awarded["supplier_id"] == sid)
+                                    else "Agreed and shortlisted — the buying agent is comparing final quotes.")}
+        else:
+            await rfq_msg(rid, sid, "Maria's assistant", "us",
+                          f"Thanks — {E.fmt_money(price)} works. Sending it to Maria to confirm the order.")
+            await db.rfq_threads.update_one({"request_id": rid, "supplier_id": sid}, {"$set": {"status": "quoted"}})
+            await create_approval("award_quote", f"Award materials order to {name}?",
+                                  f"{name} agreed to {E.fmt_money(price)} ({terms}), within your {E.fmt_money(cap)} budget.",
+                                  "buy", {"rid": rid, "supplier_id": sid}, price)
+            reaction = {"status": "pending_owner", "message": "Agreed — waiting for Maria to confirm the order."}
+    elif rnd >= NEGO_MAX_ROUNDS:
+        await db.quotes.update_one({"request_id": rid, "supplier_id": sid}, {"$set": {"nego_status": "rejected"}})
         await rfq_msg(rid, sid, "Maria's assistant", "us",
-                      f"Thanks {name} — {E.fmt_money(price)} works and is on the shortlist. We'll confirm the final pick shortly.")
-        await db.rfq_threads.update_one({"request_id": rid, "supplier_id": sid}, {"$set": {"status": "final"}})
-        reaction = {"status": "shortlisted", "message": "Within budget — the buying agent put it on the shortlist."}
+                      f"Thanks {name}, but {E.fmt_money(price)} is still above our {E.fmt_money(cap)} budget after a few rounds — we'll pass this time.")
+        await db.rfq_threads.update_one({"request_id": rid, "supplier_id": sid}, {"$set": {"status": "closed"}})
+        reaction = {"status": "closed", "message": "That's over budget after several rounds — the buying agent closed this out."}
+        if auto:
+            await maybe_auto_award(rid, origin)
     else:
+        nxt = _nego_target(cap, rnd + 1)
+        await db.quotes.update_one({"request_id": rid, "supplier_id": sid},
+                                   {"$set": {"nego_status": "negotiating", "nego": {"round": rnd + 1, "target": nxt}}})
+        await rfq_msg(rid, sid, "Rule check (code)", "code",
+                      f"{E.fmt_money(price)} vs target {E.fmt_money(nxt)} (cap {E.fmt_money(cap)}).", internal=True)
         await rfq_msg(rid, sid, "Maria's assistant", "us",
-                      f"Thanks {name} — {E.fmt_money(price)} received. Sending it to Maria for approval.")
-        await db.rfq_threads.update_one({"request_id": rid, "supplier_id": sid}, {"$set": {"status": "quoted"}})
-        reaction = {"status": "pending_owner", "message": "Received — waiting for Maria's approval."}
-    await log_activity(f"{name} submitted a quote of {E.fmt_money(price)}", "buy", scope="buy")
-    await email_owner(f"{name} submitted a quote",
-                      "New supplier quote —", [f"{name} quoted {E.fmt_money(price)} ({terms}). {reaction['message']}"])
+                      f"Thanks {name}. We can do {E.fmt_money(nxt)} on this order ({terms}). Can you meet that?",
+                      {"type": "counter", "price": nxt, "terms": terms})
+        await db.rfq_threads.update_one({"request_id": rid, "supplier_id": sid}, {"$set": {"status": "negotiating"}})
+        reaction = {"status": "countered", "message": f"The buying agent countered at {E.fmt_money(nxt)} — reply with a new price to continue."}
+
+    await log_activity(f"{name} quoted {E.fmt_money(price)} · {reaction['status']}", "buy", scope="buy")
+    await email_owner(f"{name} quoted {E.fmt_money(price)}",
+                      "Supplier update —", [f"{name} quoted {E.fmt_money(price)} ({terms}). {reaction['message']}"])
     return {"ok": True, "reaction": reaction}
+
+
+# ---------------------------------------------------------------- approvals inbox endpoints
+@api.get("/approvals")
+async def list_approvals(request: Request):
+    pending = await db.approvals.find({"status": "pending"}, NO_ID).sort("created_at", -1).to_list(200)
+    recent = await db.approvals.find({"status": {"$ne": "pending"}}, NO_ID).sort("created_at", -1).to_list(15)
+    return {"pending": pending, "recent": recent}
+
+
+@api.post("/approvals/{aid}/resolve")
+async def resolve_approval(aid: str, request: Request, payload: dict = Body(default={})):
+    ap = await db.approvals.find_one({"id": aid}, NO_ID)
+    if not ap:
+        raise HTTPException(404, "Approval not found")
+    if ap["status"] != "pending":
+        return {"ok": True, "already": ap["status"]}
+    decision = payload.get("decision")
+    origin = (payload.get("origin_url") or request.headers.get("origin") or "").rstrip("/")
+    if decision == "approve":
+        if ap["kind"] == "award_quote":
+            await award_winner(ap["ref"]["rid"], ap["ref"]["supplier_id"], origin)
+        elif ap["kind"] == "client_counter":
+            a = await get_action(ap["ref"]["action_id"])
+            await accept_action(a, "Maria approved the counter.")
+        await db.approvals.update_one({"id": aid}, {"$set": {"status": "approved", "resolved_at": now_iso()}})
+    elif decision == "reject":
+        if ap["kind"] == "award_quote":
+            rid, sid = ap["ref"]["rid"], ap["ref"]["supplier_id"]
+            await db.rfq_threads.update_one({"request_id": rid, "supplier_id": sid}, {"$set": {"status": "closed"}})
+            await rfq_msg(rid, sid, "Maria's assistant", "us", "Thanks for the quote — we won't move ahead this time.")
+        await db.approvals.update_one({"id": aid}, {"$set": {"status": "rejected", "resolved_at": now_iso()}})
+    else:
+        raise HTTPException(400, "decision must be approve or reject")
+    return {"ok": True}
 
 
 app.include_router(clerk_router)
