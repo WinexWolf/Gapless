@@ -339,6 +339,7 @@ textarea.input { resize: vertical; }
   .brand { font-size: 17px; gap: 7px; }
   .mode-pill { padding: 3px; }
   .mode-pill button { padding: 6px 9px; font-size: 12px; gap: 4px; }
+  .set-row { flex-wrap: wrap; }
   .top-nav, .biz-pill { display: none; }
   .g-main { padding: 16px 14px 170px; }
   .g-bottom { display: grid; grid-template-columns: repeat(7, 1fr); position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--line); z-index: 100; padding-bottom: env(safe-area-inset-bottom); }
@@ -800,8 +801,10 @@ textarea.input { resize: vertical; }
 .field input { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font: inherit; }
 .field input:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; border-color: var(--teal); }
 
-.people-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.people-right { display: inline-flex; align-items: center; gap: 10px; }
+.people-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.people-row > div { min-width: 0; }
+.people-row b, .people-row .tiny { overflow-wrap: anywhere; word-break: break-word; }
+.people-right { display: inline-flex; align-items: center; gap: 10px; flex-shrink: 0; }
 
 .approval-item { }
 .approval-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
