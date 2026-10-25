@@ -16,6 +16,7 @@ import Outbox from "@/pages/Outbox";
 import Offer from "@/pages/Offer";
 import Landing from "@/pages/Landing";
 import Digest from "@/pages/Digest";
+import ThemeToggle from "@/components/ThemeToggle";
 
 const NAV = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, id: "dashboard" },
@@ -42,7 +43,10 @@ function Shell() {
               <NavLink key={n.to} to={n.to} end={n.to === "/"} className="top-link" data-testid={`nav-${n.id}`}>{n.label}</NavLink>
             ))}
           </nav>
-          <div className="biz-pill" data-testid="biz-pill">Bay Remodel Co.</div>
+          <div className="g-top-right">
+            <ThemeToggle compact />
+            <div className="biz-pill" data-testid="biz-pill">Bay Remodel Co.</div>
+          </div>
         </div>
       </header>
       <main className="g-main">

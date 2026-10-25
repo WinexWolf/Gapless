@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { AlertTriangle, CheckCircle2, RefreshCw, ArrowRight } from "lucide-react";
@@ -7,15 +7,27 @@ import GapBar from "@/components/GapBar";
 import WeekBars from "@/components/WeekBars";
 import { Loading } from "@/components/Common";
 import PaydayCard from "@/components/PaydayCard";
+import Confetti from "@/components/Confetti";
 
 export default function Dashboard() {
   const { tick } = useApp();
   const [d, setD] = useState(null);
   const [regen, setRegen] = useState(false);
+  const [burstKey, setBurstKey] = useState(0);
+  const prevCovered = useRef(null);
 
   useEffect(() => {
     http.get("/forecast").then((r) => setD(r.data)).catch((e) => toast.error(errMsg(e)));
   }, [tick]);
+
+  useEffect(() => {
+    if (!d) return;
+    const nowCovered = !!d.status.covered;
+    if (prevCovered.current === false && nowCovered) {
+      setBurstKey((k) => k + 1);
+    }
+    prevCovered.current = nowCovered;
+  }, [d]);
 
   if (!d) return <Loading />;
   const { forecast: fc, status: st } = d;
@@ -36,6 +48,7 @@ export default function Dashboard() {
 
   return (
     <div className="page" data-testid="dashboard-page">
+      <Confetti fireKey={burstKey} />
       {st.covered ? (
         <div className="banner banner-green" data-testid="gap-banner">
           <CheckCircle2 size={22} aria-hidden="true" />

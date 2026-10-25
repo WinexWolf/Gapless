@@ -1,26 +1,22 @@
 [
   {
-    "content": "Fix 'Covered ✓' badge readability - replace low-contrast overlay with high-contrast pill",
+    "content": "Confetti Burst on first flip to Covered",
     "status": "completed"
   },
   {
-    "content": "Make Landing clearly distinct — enhance hero, add gradient, polish stats/CTA",
+    "content": "Dark Mode Toggle with localStorage persistence",
     "status": "completed"
   },
   {
-    "content": "Overall UI enhancement — card shadows, button polish, celebration PaydayCard",
+    "content": "Landing Testimonial quote card",
     "status": "completed"
   },
   {
-    "content": "Link brand to Landing from inside Shell so user can return",
+    "content": "Mobile home link in bottom-nav / More page",
     "status": "completed"
   },
   {
-    "content": "Verify fixes via screenshots at desktop + mobile",
-    "status": "completed"
-  },
-  {
-    "content": "Call testing_agent to verify the Covered badge readability + brand-to-landing fixes",
+    "content": "Visual verification + testing_agent",
     "status": "completed"
   }
 ]

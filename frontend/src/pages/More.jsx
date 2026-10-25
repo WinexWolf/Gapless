@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { Settings as Cog, Activity as Act, Send, ChevronRight, FilePlus2, CalendarDays } from "lucide-react";
+import { Settings as Cog, Activity as Act, Send, ChevronRight, FilePlus2, CalendarDays, Home } from "lucide-react";
 import { http, errMsg, useApp } from "@/lib/api";
 
 const EMPTY = { kind: "receivable", party: "", number: "", amount: "", due_date: "" };
@@ -27,14 +27,14 @@ export default function More() {
     try { await http.post("/invoices", { ...f, amount: Number(f.amount) }); toast.success("Invoice added to the forecast"); setF(EMPTY); setText(""); setSrc(""); bump(); }
     catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
   };
-  const links = [["/digest", "Monday digest", CalendarDays], ["/activity", "Activity log", Act], ["/outbox", "Simulated outbox", Send], ["/settings", "Settings", Cog]];
+  const links = [["/", "Back to home", Home], ["/digest", "Monday digest", CalendarDays], ["/activity", "Activity log", Act], ["/outbox", "Simulated outbox", Send], ["/settings", "Settings", Cog]];
 
   return (
     <div className="page narrow" data-testid="more-page">
       <div className="page-head"><div><div className="eyebrow">More</div><h1 className="h1">Tools</h1></div></div>
       <section className="card list-links">
         {links.map(([to, label, Icon]) => (
-          <Link key={to} to={to} className="list-link" data-testid={`more-link-${to.slice(1)}`}><Icon size={18} /> <span>{label}</span><ChevronRight size={18} /></Link>
+          <Link key={to} to={to} className="list-link" data-testid={`more-link-${to === "/" ? "home" : to.slice(1)}`}><Icon size={18} /> <span>{label}</span><ChevronRight size={18} /></Link>
         ))}
       </section>
       <section className="card" data-testid="add-invoice">

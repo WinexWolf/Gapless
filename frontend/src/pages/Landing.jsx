@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, ShieldCheck, Bot, Truck, CheckCircle2, Scale, Eye, Lock, Sparkles } from "lucide-react";
+import { ArrowRight, ShieldCheck, Bot, Truck, CheckCircle2, Scale, Eye, Lock, Sparkles, Star } from "lucide-react";
 import GapBar from "@/components/GapBar";
+import ThemeToggle from "@/components/ThemeToggle";
 
 const FRAMES = [
   { secured: 0, pending: 0, label: "Short $9,800 on Friday", note: "Payroll $18,500 · bank $12,000" },
@@ -38,7 +39,10 @@ export default function Landing() {
       <header className="lp-top">
         <div className="lp-in lp-top-in">
           <Link to="/" className="brand" data-testid="landing-brand"><span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>Gapless</Link>
-          <Link to="/dashboard" className="btn btn-primary btn-sm" data-testid="landing-top-cta">Open the demo</Link>
+          <div className="g-top-right">
+            <ThemeToggle compact />
+            <Link to="/dashboard" className="btn btn-primary btn-sm" data-testid="landing-top-cta">Open the demo</Link>
+          </div>
         </div>
       </header>
 
@@ -122,6 +126,25 @@ export default function Landing() {
             <div><ShieldCheck size={20} /><b>You approve everything</b><span>No message, deal or payment goes ahead without your OK.</span></div>
             <div><Bot size={20} /><b>AI only writes words</b><span>Every number, date and decision comes from plain rules, never the AI.</span></div>
             <div><Eye size={20} /><b>See every step</b><span>Threads, an outbox and an activity log show exactly what happened.</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section className="lp-in lp-quote-wrap" data-testid="landing-testimonial">
+        <div className="lp-quote">
+          <div className="lp-quote-avatar" aria-hidden="true">RM</div>
+          <div className="lp-quote-body">
+            <p className="lp-quote-text">"Friday was always the day I called the bank in a panic. With Gapless I saw the gap on Tuesday, approved two reminders and an early-pay offer, and payroll went out without me losing sleep."</p>
+            <div className="lp-quote-attr">
+              <span className="lp-quote-stars" aria-label="5 out of 5 stars">
+                <Star size={14} fill="currentColor" strokeWidth={0} />
+                <Star size={14} fill="currentColor" strokeWidth={0} />
+                <Star size={14} fill="currentColor" strokeWidth={0} />
+                <Star size={14} fill="currentColor" strokeWidth={0} />
+                <Star size={14} fill="currentColor" strokeWidth={0} />
+              </span>
+              <b>Rosa Marquez</b> · Owner, Marquez Finish Carpentry · 7 crew
+            </div>
           </div>
         </div>
       </section>
