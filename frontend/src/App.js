@@ -1,0 +1,87 @@
+import React, { useCallback, useState } from "react";
+import "@/App.css";
+import { BrowserRouter, Routes, Route, NavLink, Link } from "react-router-dom";
+import { Toaster } from "sonner";
+import { LayoutDashboard, ListChecks, ShoppingCart, MessagesSquare, Menu } from "lucide-react";
+import { AppCtx } from "@/lib/api";
+import DemoControls from "@/components/DemoControls";
+import Dashboard from "@/pages/Dashboard";
+import Plan from "@/pages/Plan";
+import Threads from "@/pages/Threads";
+import Buy from "@/pages/Buy";
+import More from "@/pages/More";
+import Settings from "@/pages/Settings";
+import Activity from "@/pages/Activity";
+import Outbox from "@/pages/Outbox";
+import Offer from "@/pages/Offer";
+
+const NAV = [
+  { to: "/", label: "Dashboard", icon: LayoutDashboard, id: "dashboard" },
+  { to: "/plan", label: "Plan", icon: ListChecks, id: "plan" },
+  { to: "/buy", label: "Buy", icon: ShoppingCart, id: "buy" },
+  { to: "/threads", label: "Threads", icon: MessagesSquare, id: "threads" },
+  { to: "/more", label: "More", icon: Menu, id: "more" },
+];
+
+export function Footer() {
+  return <footer className="footer" data-testid="footer">Demo: synthetic data</footer>;
+}
+
+function Shell() {
+  return (
+    <div className="g-app">
+      <header className="g-top">
+        <div className="g-top-in">
+          <Link to="/" className="brand" data-testid="brand">
+            <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>Gapless
+          </Link>
+          <nav className="top-nav" aria-label="Main">
+            {NAV.map((n) => (
+              <NavLink key={n.to} to={n.to} end={n.to === "/"} className="top-link" data-testid={`nav-${n.id}`}>{n.label}</NavLink>
+            ))}
+          </nav>
+          <div className="biz-pill" data-testid="biz-pill">Bay Remodel Co.</div>
+        </div>
+      </header>
+      <main className="g-main">
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/plan" element={<Plan />} />
+          <Route path="/threads" element={<Threads />} />
+          <Route path="/buy" element={<Buy />} />
+          <Route path="/more" element={<More />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/activity" element={<Activity />} />
+          <Route path="/outbox" element={<Outbox />} />
+          <Route path="*" element={<Dashboard />} />
+        </Routes>
+        <Footer />
+      </main>
+      <nav className="g-bottom" aria-label="Main mobile">
+        {NAV.map((n) => (
+          <NavLink key={n.to} to={n.to} end={n.to === "/"} className="bottom-link" data-testid={`bnav-${n.id}`}>
+            <n.icon size={20} aria-hidden="true" />
+            <span>{n.label}</span>
+          </NavLink>
+        ))}
+      </nav>
+      <DemoControls />
+    </div>
+  );
+}
+
+export default function App() {
+  const [tick, setTick] = useState(0);
+  const bump = useCallback(() => setTick((t) => t + 1), []);
+  return (
+    <AppCtx.Provider value={{ tick, bump }}>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/o/:token" element={<Offer />} />
+          <Route path="*" element={<Shell />} />
+        </Routes>
+      </BrowserRouter>
+      <Toaster position="top-center" richColors closeButton />
+    </AppCtx.Provider>
+  );
+}
