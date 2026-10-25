@@ -1,16 +1,22 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import "@/App.css";
-import { BrowserRouter, Routes, Route, NavLink, Link } from "react-router-dom";
+import { BrowserRouter, Routes, Route, NavLink, Link, Navigate } from "react-router-dom";
 import { MotionConfig } from "framer-motion";
+import { Show, UserButton } from "@clerk/react";
 import { BillingProvider } from "@/lib/billing";
 import { ThemeSync } from "@/lib/theme";
 import BillingReturn from "@/pages/BillingReturn";
 import { Toaster } from "@/components/ui/sonner";
-import { LayoutDashboard, ListChecks, ShoppingCart, MessagesSquare, Menu, Sparkles } from "lucide-react";
-import { AppCtx } from "@/lib/api";
+import { LayoutDashboard, ListChecks, ShoppingCart, MessagesSquare, Menu, Sparkles, Loader2, RefreshCw } from "lucide-react";
+import { AppCtx, http } from "@/lib/api";
 import { ModeProvider } from "@/lib/mode";
 import ModePill from "@/components/ModePill";
 import DemoControls from "@/components/DemoControls";
+import { MotionButton } from "@/components/MotionButton";
+import ClerkAuthProvider from "@/components/auth/ClerkAuthProvider";
+import { SignInPage, SignUpPage } from "@/components/auth/AuthPages";
+import Claim from "@/pages/Claim";
+import { ClientPortal, SupplierPortal } from "@/pages/Portals";
 import Dashboard from "@/pages/Dashboard";
 import Plan from "@/pages/Plan";
 import Threads from "@/pages/Threads";
@@ -44,7 +50,7 @@ function Shell() {
     <div className="g-app">
       <header className="g-top">
         <div className="g-top-in">
-          <Link to="/" className="brand" data-testid="brand">
+          <Link to="/dashboard" className="brand" data-testid="brand">
             <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>Gapless
           </Link>
           <nav className="top-nav" aria-label="Main">
@@ -55,7 +61,7 @@ function Shell() {
           <div className="g-top-right">
             <ModePill compact />
             <ThemeToggle compact />
-            <div className="biz-pill" data-testid="biz-pill">Bay Remodel Co.</div>
+            <UserButton afterSignOutUrl="/" />
           </div>
         </div>
       </header>
@@ -90,6 +96,48 @@ function Shell() {
   );
 }
 
+function FullScreen({ children, testid }) {
+  return <div className="auth-screen" data-testid={testid}><div className="auth-center">{children}</div></div>;
+}
+
+// Decides which experience to show based on the signed-in user's role.
+function RoleRouter() {
+  const [me, setMe] = useState(null);
+  const [state, setState] = useState("loading"); // loading | ready | error
+  const load = useCallback(async () => {
+    setState("loading");
+    try {
+      const r = await http.get("/me");
+      setMe(r.data);
+      setState("ready");
+    } catch (e) {
+      setState("error");
+    }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  if (state === "loading") return <FullScreen testid="role-loading"><Loader2 className="spin" size={28} /><p className="muted">Setting up your account…</p></FullScreen>;
+  if (state === "error") return (
+    <FullScreen testid="role-error">
+      <p className="muted">We couldn't load your account.</p>
+      <MotionButton className="btn btn-primary" onClick={load} data-testid="role-retry"><RefreshCw size={16} /> Try again</MotionButton>
+    </FullScreen>
+  );
+  if (me.role === "owner_admin") return <Shell />;
+  if (me.role === "client") return <ClientPortal me={me} />;
+  if (me.role === "supplier") return <SupplierPortal me={me} />;
+  return <Claim me={me} onClaimed={load} />;
+}
+
+function AuthedApp() {
+  return (
+    <>
+      <Show when="signed-in"><RoleRouter /></Show>
+      <Show when="signed-out"><Navigate to="/sign-in" replace /></Show>
+    </>
+  );
+}
+
 export default function App() {
   const [tick, setTick] = useState(0);
   const bump = useCallback(() => setTick((t) => t + 1), []);
@@ -98,13 +146,17 @@ export default function App() {
     <AppCtx.Provider value={{ tick, bump }}>
       <ThemeSync />
       <BrowserRouter>
+        <ClerkAuthProvider>
         <BillingProvider>
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/o/:token" element={<Offer />} />
-          <Route path="*" element={<Shell />} />
+          <Route path="/sign-in/*" element={<SignInPage />} />
+          <Route path="/sign-up/*" element={<SignUpPage />} />
+          <Route path="*" element={<AuthedApp />} />
         </Routes>
         </BillingProvider>
+        </ClerkAuthProvider>
       </BrowserRouter>
       <Toaster position="top-center" visibleToasts={3} closeButton />
     </AppCtx.Provider>

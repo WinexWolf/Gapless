@@ -17,6 +17,12 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 import engine as E
 from llm import llm_text, extract_json
+try:
+    from backend.clerk_auth import clerk_router, require_user
+    from backend import auth_roles
+except ModuleNotFoundError:
+    from clerk_auth import clerk_router, require_user
+    import auth_roles
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -31,7 +37,40 @@ async def premium_guard(request: Request):
     await billing.gate(db, request)
 
 
-api = APIRouter(prefix="/api", dependencies=[Depends(premium_guard)])
+# ---------------------------------------------------------------- access control (Clerk roles)
+# Public endpoints that never require a login (marketing, email offer links, share image, auth config).
+_PUBLIC_PREFIXES = ("/api/offers", "/api/payments", "/api/summary", "/api/clerk", "/api/billing")
+# Any signed-in user may reach these (self-service identity + claiming a counterparty).
+_SELF_PATHS = ("/api/me", "/api/auth/claimable", "/api/auth/claim")
+
+
+async def access_guard(request: Request):
+    """When Clerk is configured, gate /api by role. No-op in dev before keys exist so the
+    app keeps working. Owner app -> owner_admin; /api/portal/client|supplier -> that role."""
+    if not auth_roles.clerk_enabled():
+        return
+    path = request.url.path.rstrip("/") or request.url.path
+    if request.method == "OPTIONS":
+        return
+    if any(path.startswith(p) for p in _PUBLIC_PREFIXES):
+        return
+    user = require_user(request)  # raises 401 if not signed in
+    member = await auth_roles.get_or_create_member(db, user)
+    request.state.member = member
+    role = member["role"]
+    if path in _SELF_PATHS or path.startswith("/api/me"):
+        return
+    if path.startswith("/api/portal/client"):
+        need = "client"
+    elif path.startswith("/api/portal/supplier"):
+        need = "supplier"
+    else:
+        need = "owner_admin"
+    if role != need:
+        raise HTTPException(status_code=403, detail=f"Requires {need} access")
+
+
+api = APIRouter(prefix="/api", dependencies=[Depends(premium_guard), Depends(access_guard)])
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("gapless")
 
@@ -1582,6 +1621,63 @@ async def buy_next():
     return {"ok": False, "message": "This order is complete. Reset to run it again." if st == "done" else "All quotes were denied."}
 
 
+# ---------------------------------------------------------------- auth / identity (Clerk roles)
+@api.get("/me")
+async def me(request: Request):
+    if not auth_roles.clerk_enabled():
+        # Dev/unconfigured: behave as the owner so the app stays usable before keys exist.
+        return {"authenticated": False, "clerk_enabled": False, "role": "owner_admin",
+                "needs_claim": False, "name": "Owner", "email": "", "linked_name": None}
+    member = getattr(request.state, "member", None) or await auth_roles.get_or_create_member(db, require_user(request))
+    return {"authenticated": True, "clerk_enabled": True, "user_id": member["user_id"],
+            "email": member.get("email"), "name": member.get("name"), "role": member["role"],
+            "linked_kind": member.get("linked_kind"), "linked_id": member.get("linked_id"),
+            "linked_name": member.get("linked_name"), "needs_claim": member["role"] == "pending"}
+
+
+@api.get("/auth/claimable")
+async def auth_claimable(request: Request):
+    return await auth_roles.claimable_counterparties(db)
+
+
+@api.post("/auth/claim")
+async def auth_claim(request: Request, payload: dict = Body(default={})):
+    user = require_user(request)
+    member = await auth_roles.claim_counterparty(db, user, payload.get("kind"), payload.get("id"))
+    return {"ok": True, "role": member["role"], "linked_name": member.get("linked_name")}
+
+
+@api.get("/auth/people")
+async def auth_people(request: Request):
+    """Owner-only roster of who has signed in and what they're linked to."""
+    people = await db.user_profiles.find({"env": auth_roles.ENV}, {"_id": 0}).to_list(500)
+    return {"people": people}
+
+
+# ---------------------------------------------------------------- portals (client / supplier)
+async def _me(request: Request):
+    return await auth_roles.get_or_create_member(db, require_user(request))
+
+
+@api.get("/portal/client/summary")
+async def portal_client_summary(request: Request):
+    m = await _me(request)
+    name = m.get("linked_name")
+    invoices = await db.receivables.find({"customer": name}, NO_ID).to_list(100)
+    threads = await db.threads.find({"counterparty": name}, NO_ID).to_list(100)
+    return {"name": name, "role": "client", "invoices": invoices, "threads": threads}
+
+
+@api.get("/portal/supplier/summary")
+async def portal_supplier_summary(request: Request):
+    m = await _me(request)
+    sid, name = m.get("linked_id"), m.get("linked_name")
+    rfqs = await db.rfq_threads.find({"supplier_id": sid}, NO_ID).to_list(100)
+    quotes = await db.quotes.find({"supplier_id": sid}, NO_ID).to_list(100)
+    return {"name": name, "role": "supplier", "rfqs": rfqs, "quotes": quotes}
+
+
+app.include_router(clerk_router)
 app.include_router(billing.router(db))
 app.include_router(api)
 app.add_middleware(CORSMiddleware, allow_credentials=True,

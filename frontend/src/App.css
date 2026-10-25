@@ -756,3 +756,31 @@ textarea.input { resize: vertical; }
   .wt-node span { display: none; }
   .wt-controls .btn, .wt-cta-row .btn { flex: 1 1 auto; }
 }
+
+/* ---------------------------------------------------------------- auth + portals */
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.auth-screen { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-5); padding: var(--space-6) var(--space-4); background: var(--bg); }
+.auth-brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 750; font-size: 22px; color: var(--ink); }
+.auth-card-wrap { display: flex; align-items: center; justify-content: center; width: 100%; }
+.auth-foot { margin: 0; }
+.auth-center { display: flex; flex-direction: column; align-items: center; gap: var(--space-3); text-align: center; }
+
+.portal-shell { min-height: 100vh; background: var(--bg); }
+.portal-top { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; justify-content: space-between; padding: 14px clamp(16px, 4vw, 40px); background: color-mix(in srgb, var(--surface) 82%, transparent); backdrop-filter: saturate(180%) blur(18px); -webkit-backdrop-filter: saturate(180%) blur(18px); border-bottom: 1px solid var(--line); }
+.portal-top .brand { display: inline-flex; align-items: center; gap: 9px; font-weight: 750; color: var(--ink); }
+
+.claim-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin-top: var(--space-3); }
+.claim-opt { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 16px; border-radius: 14px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font-weight: 600; text-align: left; transition: border-color .2s, background .2s, transform .15s; }
+.claim-opt:hover:not(:disabled) { border-color: var(--teal); background: var(--teal-l); transform: translateY(-1px); }
+.claim-opt:disabled, .claim-opt.taken { opacity: .55; cursor: not-allowed; }
+.claim-opt .claim-pick { color: var(--teal-h); opacity: 0; transition: opacity .15s; }
+.claim-opt:hover:not(:disabled) .claim-pick { opacity: 1; }
+
+.portal-list { display: flex; flex-direction: column; gap: 8px; margin-top: var(--space-2); }
+.portal-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); }
+.portal-amt { font-weight: 750; color: var(--ink); white-space: nowrap; }
+.portal-thread { padding: 12px 14px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); margin-top: 8px; }
+.portal-msg { margin-top: 6px; }
+.portal-msg div { font-size: 14px; color: var(--ink); }

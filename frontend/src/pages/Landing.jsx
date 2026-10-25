@@ -48,14 +48,14 @@ export default function Landing() {
           <MotionButton className={language === "es" ? "on" : ""} onClick={() => setLanguage("es")} aria-pressed={language === "es"} aria-label="Español" data-testid="landing-language-es">ES</MotionButton>
         </div>
         <ThemeToggle compact language={language} />
-        <MotionButton asChild className="btn btn-primary btn-sm lp-top-cta" data-testid="landing-top-cta"><Link to="/dashboard">{c.open}</Link></MotionButton>
+        <MotionButton asChild className="btn btn-primary btn-sm lp-top-cta" data-testid="landing-top-cta"><Link to="/sign-in">{c.open}</Link></MotionButton>
       </div>
     </div></header>
     <div className="lp-hero-wrap"><section className="lp-in lp-hero">
       <div><div className="lp-badge" data-testid="landing-badge"><span className="pulse" aria-hidden="true" />{c.badge}</div>
         <h1 className="lp-h1" data-testid="landing-title">{c.title} <em>{c.accent}</em></h1>
         <p className="lp-lead" data-testid="landing-lead">{c.lead}</p>
-        <div className="btn-row"><MotionButton asChild className="btn btn-primary btn-lg" data-testid="landing-hero-cta"><Link to="/dashboard">{c.cta}<ArrowRight size={18} /></Link></MotionButton><MotionButton asChild className="btn btn-ghost btn-lg" data-testid="landing-how-link"><a href="#how">{c.howLink}</a></MotionButton></div>
+        <div className="btn-row"><MotionButton asChild className="btn btn-primary btn-lg" data-testid="landing-hero-cta"><Link to="/sign-in">{c.cta}<ArrowRight size={18} /></Link></MotionButton><MotionButton asChild className="btn btn-ghost btn-lg" data-testid="landing-how-link"><a href="#how">{c.howLink}</a></MotionButton></div>
         <p className="tiny muted lp-safety" data-testid="landing-safety"><ShieldCheck size={14} />{c.safety}</p>
       </div><HeroDemo copy={c} language={language} />
     </section></div>
@@ -65,7 +65,7 @@ export default function Landing() {
     <section className="lp-trust"><div className="lp-in"><div className="lp-section-head"><h2 className="lp-h2 light" data-testid="landing-rules-title">{c.rules}</h2></div><div className="lp-trust-grid">{c.trust.map(([h,p],i)=>{const Icon=TRUST_ICONS[i];return <div key={i} data-testid={`landing-trust-${i}`}><Icon size={20}/><b>{h}</b><span>{p}</span></div>;})}</div></div></section>
     <section className="lp-in lp-quote-wrap" data-testid="landing-testimonial"><div className="lp-quote"><div className="lp-quote-avatar" aria-hidden="true">RM</div><div className="lp-quote-body"><p className="lp-quote-text" data-testid="landing-quote">“{c.quote}”</p><div className="lp-quote-attr"><span className="lp-quote-stars" aria-label={c.stars}>{[0,1,2,3,4].map(n=><Star key={n} size={14} fill="currentColor" strokeWidth={0}/>)}</span><b>Rosa Marquez</b> · {c.quoteAttr}</div><p className="tiny muted" data-testid="landing-fictional-note">{c.fictional}</p></div></div></section>
     <section className="lp-in lp-section" data-testid="landing-pricing"><div className="card lp-pricing"><div><div className="eyebrow">{c.pricingEyebrow}</div><h2 className="lp-h2">{c.pricingTitle}</h2><p className="muted">{c.pricingLead}</p><p className="tiny muted">{c.sample}</p></div><div className="lp-pricing-action"><div className="paywall-price" data-testid="landing-plan-price"><b>{status?.price_label || "$19 USD"}</b><span>{c.priceSuffix}</span></div><MotionButton className="btn btn-primary" onClick={() => openPaywall(language)} data-testid="landing-monthly-access">{status?.active ? c.manage : c.upgrade}<ArrowRight size={17}/></MotionButton></div></div></section>
-    <section className="lp-in lp-cta"><div><h2 className="lp-h2" data-testid="landing-end-title">{c.endTitle}</h2><p className="muted">{c.endLead}</p><p className="tiny muted">{c.previewNote}</p></div><MotionButton asChild className="btn btn-primary btn-lg" data-testid="landing-bottom-cta"><Link to="/dashboard"><CheckCircle2 size={18}/>{c.cta}</Link></MotionButton></section>
+    <section className="lp-in lp-cta"><div><h2 className="lp-h2" data-testid="landing-end-title">{c.endTitle}</h2><p className="muted">{c.endLead}</p><p className="tiny muted">{c.previewNote}</p></div><MotionButton asChild className="btn btn-primary btn-lg" data-testid="landing-bottom-cta"><Link to="/sign-in"><CheckCircle2 size={18}/>{c.cta}</Link></MotionButton></section>
     <footer className="footer" data-testid="footer">{c.footer}</footer>
   </div>;
 }

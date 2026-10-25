@@ -1,42 +1,42 @@
 [
   {
-    "content": "Backend: add always-unlocked paywall bypass (PAYWALL_ENABLED env) in server.premium_guard + billing.gate/status",
+    "content": "Phase 4: Add backend/clerk_auth.py (Clerk config + relay + require_user) and wire into server.py",
     "status": "completed"
   },
   {
-    "content": "Backend: add mode (demo/real) to settings + guard simulate/walkthrough in real mode",
+    "content": "Phase 4: Append ADMIN_EMAIL to backend .env; provision Clerk (google sign-in, app_name Gapless)",
     "status": "completed"
   },
   {
-    "content": "Backend: add /api/demo/walkthrough/next endpoint driving payroll then buy with narration/titles",
+    "content": "Phase 4: Roles model (owner/client/supplier) + current_member dependency + /api/me + counterparty linking (claim) endpoints",
     "status": "completed"
   },
   {
-    "content": "Backend: soften prominent 'simulated/synthetic' copy (payday summary footer)",
+    "content": "Phase 4: Seed existing cast as claimable counterparty login records",
     "status": "completed"
   },
   {
-    "content": "Frontend: build Walkthrough page (auto-play, phase trail, narration timeline, success state)",
+    "content": "Phase 4: Frontend Clerk provider + /sign-in route + header UserButton + role-based routing + claim screen + portals",
     "status": "completed"
   },
   {
-    "content": "Frontend: add Mode switch (Settings + header pill) + Mode context, hide DemoControls in real mode",
+    "content": "Phase 4: Test auth (401/403/role gating/isolation) + keep regression suite green under auth",
     "status": "completed"
   },
   {
-    "content": "Frontend: route + CTAs (Dashboard, More, Landing) for Walkthrough; soften simulated/demo labels",
-    "status": "completed"
+    "content": "Phase 5: Portal reply actions (client accept/counter/commit; supplier submit/counter quote) wired to deterministic engine",
+    "status": "pending"
   },
   {
-    "content": "Frontend: add Walkthrough CSS to App.css following teal glass tokens",
-    "status": "completed"
+    "content": "Phase 5: Agent reactions to real replies + autonomy toggle (act-within-guardrails vs draft-and-approve)",
+    "status": "pending"
   },
   {
-    "content": "Verify build (esbuild), restart services, test backend walkthrough + gate via curl, screenshots",
-    "status": "completed"
+    "content": "Phase 6: Real outbound email notifications (Emergent-managed Resend) with portal deep links",
+    "status": "pending"
   },
   {
-    "content": "Run testing agent end-to-end and fix reported issues",
-    "status": "in_progress"
+    "content": "Phase 7: Inbound email webhook (two-way) + DNS/domain setup checklist for the user",
+    "status": "pending"
   }
 ]

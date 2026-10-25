@@ -78,3 +78,65 @@ def unpaid_session():
     session.headers.update({'Origin': ORIGIN})
     yield session
     session.close()
+
+
+# ---------------------------------------------------------------- owner auth bootstrap
+# When Clerk auth is enabled, attach an owner Bearer token to every local-API request so
+# the pre-auth regression suite keeps working. No-op when Clerk is not configured.
+import json as _json
+import urllib.error as _uerr
+import urllib.request as _ureq
+
+_SK = os.environ.get("CLERK_SECRET_KEY", "")
+_OWNER_EMAIL = "testowner+clerk_test@example.com"
+
+
+def _clerk(path, method="GET", body=None):
+    data = _json.dumps(body).encode() if body is not None else None
+    req = _ureq.Request("https://api.clerk.com/v1" + path, data=data, method=method,
+                        headers={"Authorization": "Bearer " + _SK, "Content-Type": "application/json",
+                                 "User-Agent": "gapless-pytest"})
+    return _json.load(_ureq.urlopen(req))
+
+
+def _find_owner():
+    try:
+        users = _clerk(f"/users?email_address={_OWNER_EMAIL}")
+        return users[0]["id"] if users else None
+    except Exception:
+        return None
+
+
+def _mint_owner_token():
+    if not _SK:
+        return ""
+    uid = _find_owner()
+    if not uid:
+        try:
+            uid = _clerk("/users", "POST", {"email_address": [_OWNER_EMAIL],
+                                            "password": "Test-pass-12345!", "skip_password_checks": True})["id"]
+        except _uerr.HTTPError:
+            uid = _find_owner()
+    if not uid:
+        return ""
+    MongoClient(MONGO_URL)[DB_NAME].user_profiles.update_one(
+        {"user_id": uid},
+        {"$set": {"user_id": uid, "email": _OWNER_EMAIL, "name": "Test Owner", "role": "owner_admin",
+                  "env": "preview", "linked_kind": None, "linked_id": None, "linked_name": None}}, upsert=True)
+    sid = _clerk("/sessions", "POST", {"user_id": uid})["id"]
+    return _clerk(f"/sessions/{sid}/tokens", "POST", {"expires_in_seconds": 3600})["jwt"]
+
+
+_OWNER_TOKEN = _mint_owner_token()
+
+if _OWNER_TOKEN:
+    _orig_request = requests.sessions.Session.request
+
+    def _auth_request(self, method, url, **kwargs):
+        if "localhost:8001" in url or "127.0.0.1:8001" in url:
+            headers = kwargs.get("headers") or {}
+            headers.setdefault("Authorization", f"Bearer {_OWNER_TOKEN}")
+            kwargs["headers"] = headers
+        return _orig_request(self, method, url, **kwargs)
+
+    requests.sessions.Session.request = _auth_request
