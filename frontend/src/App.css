@@ -334,7 +334,11 @@ textarea.input { resize: vertical; }
 }
 @media (max-width: 720px) {
   body { font-size: 15px; }
-  .g-top-in { height: 56px; padding: 0 16px; }
+  .g-top-in { height: 56px; padding: 0 14px; gap: 10px; }
+  .g-top-right { gap: 7px; }
+  .brand { font-size: 17px; gap: 7px; }
+  .mode-pill { padding: 3px; }
+  .mode-pill button { padding: 6px 9px; font-size: 12px; gap: 4px; }
   .top-nav, .biz-pill { display: none; }
   .g-main { padding: 16px 14px 170px; }
   .g-bottom { display: grid; grid-template-columns: repeat(7, 1fr); position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--line); z-index: 100; padding-bottom: env(safe-area-inset-bottom); }
@@ -817,3 +821,15 @@ textarea.input { resize: vertical; }
 /* Invoice photo scan */
 .scan-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
 .scan-preview { width: 56px; height: 56px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); }
+
+/* Dashboard payroll hero: before -> after transformation */
+.hero-kpi { min-width: 0; flex: 1 1 320px; }
+.hero-transform { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+.hero-arrow { color: var(--ink2); font-weight: 600; }
+.hero-transform-sub { margin-top: 6px; }
+.hero-safety { margin-top: 12px; }
+.hero-ctas { flex: 0 0 auto; align-items: flex-end; }
+@media (max-width: 640px) { .hero-ctas { width: 100%; } .hero-ctas .btn { flex: 1; } }
+.kpi-after { animation: kpiAfterIn 220ms ease-out both; }
+@keyframes kpiAfterIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .kpi-after { animation: none; } }

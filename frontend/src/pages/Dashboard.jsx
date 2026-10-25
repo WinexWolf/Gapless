@@ -17,6 +17,7 @@ export default function Dashboard() {
   const [fetchAttempt, setFetchAttempt] = useState(0);
   const [loadError, setLoadError] = useState("");
   const [d, setD] = useState(null);
+  const [plan, setPlan] = useState(null);
   const [regen, setRegen] = useState(false);
   const [burstKey, setBurstKey] = useState(0);
   const prevCovered = useRef(null);
@@ -24,6 +25,7 @@ export default function Dashboard() {
   useEffect(() => {
     setLoadError("");
     http.get("/forecast").then((r) => setD(r.data)).catch((e) => setLoadError(errMsg(e)));
+    http.get("/plan").then((r) => setPlan(r.data)).catch(() => {});
   }, [tick, fetchAttempt]);
 
   useEffect(() => {
@@ -39,6 +41,11 @@ export default function Dashboard() {
   if (!d) return <Loading />;
   const { forecast: fc, status: st } = d;
   const upcoming = fc.items.filter((x) => x.date <= fc.friday);
+  const payroll = d.payroll ?? 18500;
+  const before = fc.friday_balance;
+  const expected = plan?.expected_total ?? (st.gap - st.remaining);
+  const afterPreview = st.covered ? fc.friday_balance : before + expected;
+  const delta = afterPreview - before;
 
   const regenerate = async () => {
     setRegen(true);
@@ -77,26 +84,39 @@ export default function Dashboard() {
           <AlertTriangle size={22} aria-hidden="true" />
           <div>
             <div className="banner-title">Short {money(st.gap)} on {fc.friday_label}</div>
-            <div className="banner-sub">Payroll is $18,500. Gap left after secured cash: {money(st.remaining)}.</div>
+            <div className="banner-sub">Payroll is {money(payroll)}. Gap left after secured cash: {money(st.remaining)}.</div>
           </div>
         </div>
       )}
 
-      <section className="card hero" data-testid="hero-card">
+      <section className="card hero g-glass" data-testid="hero-card">
         <div className="hero-top">
-          <div>
-            <div className="eyebrow">Payroll gap · {fc.friday_label}</div>
-            <div className={`big-num num ${st.covered ? "t-green" : ""}`} data-testid="hero-number">
-              {st.covered ? "Covered ✓" : `${money(st.remaining)} to go`}
+          <div className="hero-kpi" data-testid="dashboard-payroll-hero">
+            <div className="eyebrow">Protect Friday payroll · {fc.friday_label}</div>
+            <div className="hero-transform big-num num" data-testid="hero-number">
+              <span className={before < 0 ? "t-red" : "muted"} data-testid="dashboard-friday-before">{money(before)}</span>
+              <span className="hero-arrow" aria-hidden="true">→</span>
+              <span className={afterPreview >= 0 ? "t-green" : "t-red"} data-testid="dashboard-friday-after">{st.covered ? "Covered ✓" : money(afterPreview)}</span>
+            </div>
+            <div className="tiny muted hero-transform-sub">
+              {st.covered
+                ? `Payroll is ${money(payroll)} — covered with ${money(st.spare)} to spare.`
+                : `Friday today vs. after the agent's plan lands. Payroll is ${money(payroll)}.`}
+            </div>
+            <div className="chips hero-safety">
+              <span className="chip chip-deep kpi-after" data-testid="dashboard-payroll-safety-claim">Agent never breaks Friday payroll</span>
+              {delta > 0.5 && <span className="chip chip-green" data-testid="dashboard-friday-delta">+{money(delta)} from the plan</span>}
+              <span className="chip chip-line">Deterministic math</span>
             </div>
           </div>
-          <div className="btn-row" style={{ marginTop: 0 }}>
+          <div className="hero-ctas btn-row" style={{ marginTop: 0 }}>
             <Link to="/digest" className="btn btn-ghost" data-testid="open-digest-btn">Monday digest</Link>
             <MotionButton asChild className="btn btn-primary" data-testid="open-plan-btn"><Link to="/plan">Open the plan <ArrowRight size={18} /></Link></MotionButton>
           </div>
         </div>
         <GapBar gap={st.gap} secured={st.secured} pending={st.pending} covered={st.covered} />
         <div className="expl" data-testid="plan-explanation">
+          <div className="tiny muted" style={{ marginBottom: 4 }}>Why this works (numbers from rules):</div>
           <p>{d.explanation}</p>
           <MotionButton className="btn btn-ghost btn-sm" onClick={regenerate} disabled={regen} data-testid="regen-explanation">
             <RefreshCw size={15} className={regen ? "spin" : ""} /> {regen ? "Writing…" : "Regenerate"}

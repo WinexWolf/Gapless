@@ -196,7 +196,8 @@ async def get_forecast():
     await ensure_seed()
     data, actions, fc, st = await status_bundle()
     biz = data["business"][0]
-    return {"business": biz, "forecast": fc, "status": st,
+    payroll = E.r2(sum(p["amount"] for p in data["payables"] if p.get("kind") == "payroll"))
+    return {"business": biz, "forecast": fc, "status": st, "payroll": payroll,
             "explanation": biz.get("explanation"), "explanation_source": biz.get("explanation_source")}
 
 
@@ -1046,7 +1047,7 @@ async def walkthrough_next(origin):
     stage = req["stage"]
     if stage not in ("done", "denied"):
         title = _buy_step_title(stage)
-        r = await buy_next()
+        r = await buy_next(force_script=True)  # keep the autoplay showcase fast & reproducible
         return {"ok": True, "done": False, "phase": "buy", "agent": "Buying agent", "screen": "buy",
                 "title": title, "narration": r.get("message", "")}
 
@@ -1472,7 +1473,7 @@ async def make_quotes(req):
         await db.quotes.insert_one(dict(q))
 
 
-async def supplier_agent_quote(req, rnd, our_counter=None):
+async def supplier_agent_quote(req, rnd, our_counter=None, force_script=False):
     """Real AI on Pacific Lumber's (agent_agent lane) side. The LLM proposes a price + message,
     but Python CLAMPS it to a deterministic [floor, ceiling] band so money never leaves bounds.
     Falls back to scripted figures if the LLM is unavailable or disabled."""
@@ -1480,9 +1481,9 @@ async def supplier_agent_quote(req, rnd, our_counter=None):
     ceiling = E.lines_total(E.price_lines(items, E.PRICES[("pacific", "quote")]))   # opening list price
     floor = E.lines_total(E.price_lines(items, E.PRICES[("pacific", "final")]))     # true cost floor
     settings = await get_settings()
-    scripted = floor + 10.0 if rnd >= 2 else ceiling
+    scripted = floor if rnd >= 2 else ceiling
     price, message, used = None, None, "script"
-    if settings.get("supplier_ai_live", True):
+    if settings.get("supplier_ai_live", True) and not force_script:
         sys = ("You are a sales rep for Pacific Lumber negotiating a building-materials order with a "
                "contractor's buying assistant. Be warm, concise and professional. You want the best "
                "price for yourself but will concede to win the deal.")
@@ -1511,14 +1512,14 @@ async def supplier_agent_quote(req, rnd, our_counter=None):
 
 
 @api.post("/buy/{rid}/advance")
-async def buy_advance(rid: str):
+async def buy_advance(rid: str, force_script: bool = False):
     req = await get_req(rid)
     stage_guard(req, "sourcing")
     rnd = req["round"] + 1
     m = req["mandate"]
     items = req["items"]
     if rnd == 1:
-        ag = await supplier_agent_quote(req, 1)
+        ag = await supplier_agent_quote(req, 1, force_script=force_script)
         author = "Pacific Lumber agent" + (" (live AI)" if ag["source"] == "ai" else "")
         text = ag["message"] or f"Quote: {E.fmt_money(ag['price'])}, net+10, delivery {m['latest_delivery']}."
         await rfq_msg(rid, "pacific", author, "them", text,
@@ -1545,7 +1546,7 @@ async def buy_advance(rid: str):
         await db.rfq_threads.update_many({"request_id": rid, "supplier_id": {"$in": ["pacific", "bayside"]}}, {"$set": {"status": "negotiating"}})
     else:
         our_counter = (req.get("agent_nego") or {}).get("our_counter")
-        ag = await supplier_agent_quote(req, rnd, our_counter)
+        ag = await supplier_agent_quote(req, rnd, our_counter, force_script=force_script)
         author = "Pacific Lumber agent" + (" (live AI)" if ag["source"] == "ai" else "")
         text = ag["message"] or f"Final: {E.fmt_money(ag['price'])}, net+10, delivery {m['latest_delivery']}."
         await rfq_msg(rid, "pacific", author, "them", text,
@@ -1856,14 +1857,14 @@ async def receipt_match(rid: str):
     return await buy_current()
 
 
-async def buy_next():
+async def buy_next(force_script=False):
     req = await get_req()
     rid, st = req["id"], req["stage"]
     if st == "request":
         await buy_start(rid)
         return {"ok": True, "message": "Sourcing started"}
     if st == "sourcing":
-        await buy_advance(rid)
+        await buy_advance(rid, force_script=force_script)
         return {"ok": True, "message": f"Round {req['round'] + 1} of negotiation"}
     if st == "quotes":
         q = await db.quotes.find_one({"request_id": rid, "recommended": True}, NO_ID)

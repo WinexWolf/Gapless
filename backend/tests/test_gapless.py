@@ -33,6 +33,9 @@ def fresh(paid_session):
     global SESSION
     SESSION = paid_session
     post("/demo/reset")
+    # Pin the deterministic (scripted) supplier so regression assertions on exact
+    # prices stay stable. The live AI agent-vs-agent path is covered separately.
+    SESSION.put(B + "/settings", json={"supplier_ai_live": False}, timeout=10)
     yield
     SESSION.put(B + "/settings", json={"llm_force_fail": False, "supplier_has_ai": True}, timeout=10)
 

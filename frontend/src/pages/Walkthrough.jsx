@@ -137,8 +137,13 @@ export default function Walkthrough() {
     <div className="page" data-testid="walkthrough-page">
       <div className="wt-hero card" data-testid="walkthrough-hero">
         <div className="eyebrow"><Sparkles size={14} /> Guided walkthrough</div>
-        <h1 className="h2" data-testid="walkthrough-heading">Watch both agents work, end to end.</h1>
-        <p className="muted wt-sub">Press play. The payroll agent closes Friday's gap with your customers and suppliers, then the buying agent sources materials, pays safely, and tracks the delivery — all with your approvals.</p>
+        <h1 className="h2" data-testid="walkthrough-heading">From short on Friday to payroll-safe — automatically.</h1>
+        <p className="muted wt-sub">Press play. The payroll agent closes Friday's gap using only moves that keep payroll safe — collecting from customers and renegotiating suppliers — then the buying agent sources materials, pays without touching payroll cash, and tracks delivery. Every number is set by deterministic rules; you approve every move.</p>
+        <div className="chips" data-testid="walkthrough-safety-chips" style={{ marginTop: 10, marginBottom: 4 }}>
+          <span className="chip chip-deep">Agent never breaks Friday payroll</span>
+          <span className="chip chip-line">Deterministic math, AI phrasing</span>
+          <span className="chip chip-line">You approve every move</span>
+        </div>
 
         <div className="wt-trail" aria-hidden="true">
           <div className={`wt-node ${phase === "payroll" ? "active" : ""} ${phase === "buy" || phase === "done" ? "did" : ""}`}><Wallet size={16} /><span>Payroll agent</span></div>
